@@ -28,8 +28,18 @@ The bundled regression demo starts from a failing setup and lets the agent itera
 - final loss: `0.0000803726`
 - final config: `learning_rate=0.005`, `epochs=500`
 - success criterion: `final_loss <= 0.005`
+- unique model-driven config attempts: `4`
 
 That result came from the agent reading the code, running training, reading logs, changing hyperparameters, and rerunning until the target was met.
+
+![Regression tuning history](static/regression_tuning_history.png)
+
+The chart above is generated from [examples/regression_task/logs/history.jsonl](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/logs/history.jsonl) after deduplicating repeated runs. It shows the agent trying:
+
+- `lr=0.001, epochs=20`
+- `lr=0.0001, epochs=100`
+- `lr=0.005, epochs=100`
+- `lr=0.005, epochs=500`
 
 See the final run artifact in [examples/regression_task/logs/latest.json](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/logs/latest.json).
 

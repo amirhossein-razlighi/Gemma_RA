@@ -4,8 +4,12 @@ ollama:
   timeout_seconds: 120
 arxiv:
   base_url: "https://export.arxiv.org/api/query"
-  max_results: 5
+  max_results: 10
   sort_by: "submittedDate"
   sort_order: "descending"
+executor:
+  workspace_root: "."
+  max_iterations: 50
+  command_timeout_seconds: 120
 papers_dir: "./papers"
 output_dir: "./outputs"

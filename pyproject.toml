@@ -1,0 +1,41 @@
+[project]
+name = "gemma-ra"
+version = "0.1.0"
+description = "CLI-first research assistant agent powered by Gemma via Ollama."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Amirhossein" }
+]
+dependencies = [
+  "httpx>=0.28.0",
+  "pydantic>=2.9.0",
+  "pypdf>=5.0.0",
+  "pyyaml>=6.0.2",
+  "rich>=13.9.0",
+  "typer>=0.15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+]
+
+[project.scripts]
+gemma-ra = "gemma_ra.cli:app"
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gemma_ra"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+

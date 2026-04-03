@@ -111,7 +111,8 @@ class AnalysisEngine:
                     "You are a research assistant in a tool loop. "
                     "Call tools when you need more papers or metadata. "
                     "You may inspect local paper folders, search arXiv by professor, and then synthesize an answer. "
-                    "When you have enough context, respond without tool calls."
+                    "When you have enough context, respond without tool calls. "
+                    "If a paper is already loaded and the task is to analyze or review it, do not ask the user for clarification before reading the available paper content."
                 ),
             },
             {
@@ -342,6 +343,54 @@ class AnalysisEngine:
             def inspect_loaded_papers() -> str:
                 return str([self._paper_summary(paper) for paper in context.papers])
 
+            def read_loaded_paper_content(
+                paper_id: str | None = None,
+                title: str | None = None,
+                max_chars: int = 12_000,
+                offset: int = 0,
+            ) -> str:
+                if not paper_id and not title:
+                    raise RuntimeError("Provide either paper_id or title.")
+                if max_chars <= 0:
+                    raise RuntimeError("max_chars must be positive.")
+                if offset < 0:
+                    raise RuntimeError("offset must be non-negative.")
+
+                matching = None
+                if paper_id:
+                    matching = next((paper for paper in context.papers if paper.metadata.paper_id == paper_id), None)
+                elif title:
+                    normalized_title = title.strip().casefold()
+                    matches = [
+                        paper
+                        for paper in context.papers
+                        if paper.metadata.title.strip().casefold() == normalized_title
+                    ]
+                    if len(matches) > 1:
+                        raise RuntimeError(
+                            f'Multiple loaded papers match title "{title}". Use paper_id instead.'
+                        )
+                    matching = matches[0] if matches else None
+
+                if matching is None:
+                    if paper_id:
+                        raise RuntimeError(f"Paper id {paper_id} is not currently loaded in context.")
+                    raise RuntimeError(f'Paper title "{title}" is not currently loaded in context.')
+
+                content = matching.content or ""
+                start = min(offset, len(content))
+                end = min(start + max_chars, len(content))
+                excerpt = content[start:end]
+                return str(
+                    {
+                        "paper": self._paper_summary(matching),
+                        "offset": start,
+                        "returned_chars": len(excerpt),
+                        "remaining_chars": max(0, len(content) - end),
+                        "content": excerpt,
+                    }
+                )
+
             tool_specs.append(
                 {
                     "type": "function",
@@ -374,6 +423,26 @@ class AnalysisEngine:
                 }
             )
             tool_impl["inspect_loaded_papers"] = inspect_loaded_papers
+
+            tool_specs.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "read_loaded_paper_content",
+                        "description": "Read the parsed content of a currently loaded paper. Use this after loading or fetching a PDF when you need the actual paper text, not just metadata.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "paper_id": {"type": "string"},
+                                "title": {"type": "string"},
+                                "max_chars": {"type": "integer"},
+                                "offset": {"type": "integer"},
+                            },
+                        },
+                    },
+                }
+            )
+            tool_impl["read_loaded_paper_content"] = read_loaded_paper_content
 
         if "future_experiment_runner" in task_spec.allowed_tools and self.workspace is not None:
             def list_workspace_files(directory: str = ".", pattern: str = "*") -> str:

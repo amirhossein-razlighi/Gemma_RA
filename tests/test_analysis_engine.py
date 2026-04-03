@@ -366,3 +366,49 @@ def test_fetch_arxiv_full_text_accepts_title_lookup() -> None:
 
     assert fetched == ["1234.5678v1"]
     assert context.papers[0].metadata.source == "arxiv_pdf"
+
+
+def test_read_loaded_paper_content_exposes_parsed_text_to_tool_loop() -> None:
+    reports: list[tuple[str, str]] = []
+
+    class ReadClient:
+        def chat(self, messages, tools=None) -> dict:
+            tool_call = {
+                "function": {
+                    "name": "read_loaded_paper_content",
+                    "arguments": {"paper_id": "paper-1", "max_chars": 80},
+                }
+            }
+            return {"message": {"role": "assistant", "content": "", "tool_calls": [tool_call]}}
+
+        def generate_structured(self, prompt: str, schema: dict) -> dict:
+            return {
+                "problem": "Predict molecular properties.",
+                "inputs": ["Molecular graphs"],
+                "processing": "Encode graph structure and aggregate message passing features.",
+                "outputs": ["Property predictions"],
+                "key_ideas": ["Use message passing"],
+                "contributions": ["Strong benchmark results"],
+                "limitations": ["Needs labeled data"],
+            }
+
+    def reporter(kind: str, text: str, end: str = "\n") -> None:
+        reports.append((kind, text))
+
+    engine = AnalysisEngine(ReadClient(), max_iterations=1, reporter=reporter)
+    paper = PaperDocument(
+        metadata=PaperMetadata(
+            paper_id="paper-1",
+            title="Graph neural nets",
+            authors=["Jane Doe"],
+            source="local",
+        ),
+        content="This paper introduces message passing for molecular graphs.",
+        sections=[],
+    )
+    context = ResearchContext(task=TaskType.ANALYZE_PAPER, papers=[paper])
+
+    engine.run(TaskType.ANALYZE_PAPER, get_task_spec(TaskType.ANALYZE_PAPER), context)
+
+    tool_results = [text for kind, text in reports if kind == "tool_result"]
+    assert any("message passing for molecular graphs" in text for text in tool_results)

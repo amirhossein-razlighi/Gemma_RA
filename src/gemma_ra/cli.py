@@ -25,9 +25,39 @@ def _run_task(
     output_dir: Path | None,
     instructions: str | None = None,
     instructions_path: Path | None = None,
+    verbose: bool = False,
 ) -> None:
     config = load_config(config_path)
-    agent = ResearchAgent(config)
+    active_stream_kind: str | None = None
+
+    def reporter(kind: str, message: str, end: str = "\n") -> None:
+        nonlocal active_stream_kind
+        prefixes = {
+            "agent": "[cyan]agent[/cyan]",
+            "tool": "[yellow]tool[/yellow]",
+            "tool_result": "[magenta]result[/magenta]",
+            "thinking": "[blue]thinking[/blue]",
+            "model": "[green]model[/green]",
+        }
+        prefix = prefixes.get(kind, "[white]info[/white]")
+        is_stream = kind in {"thinking", "model"} and end == ""
+
+        if is_stream:
+            if active_stream_kind != kind:
+                if active_stream_kind is not None:
+                    console.print("")
+                console.print(f"{prefix} ", end="", markup=True, soft_wrap=True)
+                active_stream_kind = kind
+            console.print(message, end="", markup=False, soft_wrap=True)
+            return
+
+        if active_stream_kind is not None:
+            console.print("")
+            active_stream_kind = None
+
+        console.print(f"{prefix} {message}", end=end, markup=True, soft_wrap=True)
+
+    agent = ResearchAgent(config, reporter=reporter if verbose else None, stream_chat=verbose)
     try:
         artifact = agent.run(
             RunRequest(
@@ -44,6 +74,11 @@ def _run_task(
     except GemmaRAError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
+    except KeyboardInterrupt as exc:
+        console.print("\n[red]Interrupted.[/red] Terminating active agent processes...")
+        raise typer.Exit(code=130) from exc
+    finally:
+        agent.shutdown()
 
     console.print(f"[green]Markdown:[/green] {artifact.markdown_path}")
     console.print(f"[green]JSON:[/green] {artifact.json_path}")
@@ -74,6 +109,10 @@ CommonInstructions = Annotated[
     Path,
     typer.Option(help="Path to a free-form instruction file.", dir_okay=False),
 ]
+CommonVerbose = Annotated[
+    bool,
+    typer.Option("--verbose", help="Stream agent progress, tool calls, and model output to stdout."),
+]
 
 
 @app.command("analyze-paper")
@@ -81,6 +120,7 @@ def analyze_paper(
     paper: CommonPaper,
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
+    verbose: CommonVerbose = False,
 ) -> None:
     """Analyze one local paper into a structured summary."""
     _run_task(
@@ -91,6 +131,7 @@ def analyze_paper(
         paper_paths=paper,
         config_path=config,
         output_dir=output_dir,
+        verbose=verbose,
     )
 
 
@@ -102,9 +143,10 @@ def review_topic(
     paper: CommonPaper = [],
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
+    verbose: CommonVerbose = False,
 ) -> None:
     """Synthesize a literature review from local papers or arXiv search."""
-    _run_task(TaskType.REVIEW_TOPIC, topic, professor, papers_dir, paper, config, output_dir)
+    _run_task(TaskType.REVIEW_TOPIC, topic, professor, papers_dir, paper, config, output_dir, verbose=verbose)
 
 
 @app.command("find-papers")
@@ -113,9 +155,10 @@ def find_papers(
     professor: CommonProfessors = [],
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
+    verbose: CommonVerbose = False,
 ) -> None:
     """Find recent relevant papers from arXiv by professor name."""
-    _run_task(TaskType.FIND_PAPERS, topic, professor, None, [], config, output_dir)
+    _run_task(TaskType.FIND_PAPERS, topic, professor, None, [], config, output_dir, verbose=verbose)
 
 
 @app.command("generate-ideas")
@@ -126,9 +169,10 @@ def generate_ideas(
     paper: CommonPaper = [],
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
+    verbose: CommonVerbose = False,
 ) -> None:
     """Generate grounded research ideas from local papers or arXiv search."""
-    _run_task(TaskType.GENERATE_IDEAS, topic, professor, papers_dir, paper, config, output_dir)
+    _run_task(TaskType.GENERATE_IDEAS, topic, professor, papers_dir, paper, config, output_dir, verbose=verbose)
 
 
 @app.command("suggest-experiments")
@@ -139,9 +183,10 @@ def suggest_experiments(
     paper: CommonPaper = [],
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
+    verbose: CommonVerbose = False,
 ) -> None:
     """Suggest lightweight experiments to validate a research idea."""
-    _run_task(TaskType.SUGGEST_EXPERIMENTS, topic, professor, papers_dir, paper, config, output_dir)
+    _run_task(TaskType.SUGGEST_EXPERIMENTS, topic, professor, papers_dir, paper, config, output_dir, verbose=verbose)
 
 
 @app.command("map-research-opportunities")
@@ -152,6 +197,7 @@ def map_research_opportunities(
     paper: CommonPaper = [],
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
+    verbose: CommonVerbose = False,
 ) -> None:
     """Map a field from professors and papers, then propose novel directions and experiments."""
     _run_task(
@@ -162,6 +208,7 @@ def map_research_opportunities(
         paper,
         config,
         output_dir,
+        verbose=verbose,
     )
 
 
@@ -174,6 +221,7 @@ def run_instructions(
     paper: CommonPaper = [],
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
+    verbose: CommonVerbose = False,
 ) -> None:
     """Read INSTRUCTIONS.md, let the model choose tools, and write a structured result."""
     if not instructions_file.exists():
@@ -190,4 +238,5 @@ def run_instructions(
         output_dir,
         instructions=instructions,
         instructions_path=instructions_file,
+        verbose=verbose,
     )

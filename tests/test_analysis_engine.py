@@ -412,3 +412,49 @@ def test_read_loaded_paper_content_exposes_parsed_text_to_tool_loop() -> None:
 
     tool_results = [text for kind, text in reports if kind == "tool_result"]
     assert any("message passing for molecular graphs" in text for text in tool_results)
+
+
+def test_non_instruction_tasks_report_internal_tool_loop_completion() -> None:
+    reports: list[tuple[str, str]] = []
+
+    class ReadyClient:
+        def chat(self, messages, tools=None) -> dict:
+            return {"message": {"role": "assistant", "content": "READY", "tool_calls": []}}
+
+        def generate_structured(self, prompt: str, schema: dict) -> dict:
+            return {
+                "topic": "computer graphics",
+                "results": [
+                    {
+                        "title": "Sample Paper",
+                        "authors": ["Jane Doe"],
+                        "why_relevant": "Matches the topic.",
+                    }
+                ],
+            }
+
+    def reporter(kind: str, text: str, end: str = "\n") -> None:
+        reports.append((kind, text))
+
+    engine = AnalysisEngine(ReadyClient(), max_iterations=1, reporter=reporter)
+    context = ResearchContext(
+        task=TaskType.FIND_PAPERS,
+        topic="computer graphics",
+        professors=["Ali Mahdavi Amiri"],
+        papers=[
+            PaperDocument(
+                metadata=PaperMetadata(
+                    paper_id="paper-1",
+                    title="Sample Paper",
+                    authors=["Jane Doe"],
+                    source="arxiv",
+                ),
+                content="Short abstract.",
+                sections=[],
+            )
+        ],
+    )
+
+    engine.run(TaskType.FIND_PAPERS, get_task_spec(TaskType.FIND_PAPERS), context)
+
+    assert ("agent", "tool loop complete; proceeding to structured synthesis") in reports

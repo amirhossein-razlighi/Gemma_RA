@@ -32,6 +32,8 @@ def _run_task(
 
     def reporter(kind: str, message: str, end: str = "\n") -> None:
         nonlocal active_stream_kind
+        if kind == "model" and task != TaskType.RUN_INSTRUCTIONS:
+            return
         prefixes = {
             "agent": "[cyan]agent[/cyan]",
             "tool": "[yellow]tool[/yellow]",

@@ -111,7 +111,9 @@ class AnalysisEngine:
                     "You are a research assistant in a tool loop. "
                     "Call tools when you need more papers or metadata. "
                     "You may inspect local paper folders, search arXiv by professor, and then synthesize an answer. "
-                    "When you have enough context, respond without tool calls. "
+                    "This tool loop is an internal gather phase for a non-interactive CLI run. "
+                    "Do not ask the user follow-up questions, do not present final findings, and do not offer optional next steps here. "
+                    "When you have enough context, reply exactly with READY and no tool calls. "
                     "If a paper is already loaded and the task is to analyze or review it, do not ask the user for clarification before reading the available paper content."
                 ),
             },
@@ -159,7 +161,10 @@ class AnalysisEngine:
                         }
                     )
                     continue
-                self._report("agent", "model stopped requesting tools")
+                if task != TaskType.RUN_INSTRUCTIONS:
+                    self._report("agent", "tool loop complete; proceeding to structured synthesis")
+                else:
+                    self._report("agent", "model stopped requesting tools")
                 break
             for call in tool_calls:
                 function = call.get("function", {})

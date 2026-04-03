@@ -34,14 +34,14 @@ That result came from the agent reading the code, running training, reading logs
 
 ![Regression tuning history](static/regression_tuning_history.png)
 
-The chart above is generated from [examples/regression_task/logs/history.jsonl](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/logs/history.jsonl) after deduplicating repeated runs. It shows the agent trying:
+The chart above is generated from [examples/regression_task/logs/history.jsonl](examples/regression_task/logs/history.jsonl) after deduplicating repeated runs. It shows the agent trying:
 
 - `lr=0.001, epochs=20`
 - `lr=0.0001, epochs=100`
 - `lr=0.005, epochs=100`
 - `lr=0.005, epochs=500`
 
-See the final run artifact in [examples/regression_task/logs/latest.json](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/logs/latest.json).
+See the final run artifact in [examples/regression_task/logs/latest.json](examples/regression_task/logs/latest.json).
 
 ## What It Can Do
 
@@ -110,11 +110,11 @@ uv run gemma-ra run-instructions \
 
 What happens:
 
-1. The agent reads [examples/regression_task/INSTRUCTIONS.md](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/INSTRUCTIONS.md)
+1. The agent reads [examples/regression_task/INSTRUCTIONS.md](examples/regression_task/INSTRUCTIONS.md)
 2. It inspects the workspace files
-3. It runs [examples/regression_task/train.py](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/train.py) with `uv run python`
-4. It reads [examples/regression_task/logs/latest.json](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/logs/latest.json)
-5. It edits [examples/regression_task/config.json](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/config.json)
+3. It runs [examples/regression_task/train.py](examples/regression_task/train.py) with `uv run python`
+4. It reads [examples/regression_task/logs/latest.json](examples/regression_task/logs/latest.json)
+5. It edits [examples/regression_task/config.json](examples/regression_task/config.json)
 6. It reruns until the target loss is achieved
 
 ## CLI Examples

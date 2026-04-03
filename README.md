@@ -127,7 +127,7 @@ Find papers by professor name on arXiv:
 uv run gemma-ra find-papers --topic "computer graphics" --professor "Ali Mahdavi Amiri" --verbose
 ```
 
-Generate research ideas:
+Generate research ideas, based on recent papers of a professor:
 
 ```bash
 uv run gemma-ra generate-ideas --topic "small-model agents" --professor "Yejin Choi" --verbose
@@ -142,7 +142,7 @@ uv run gemma-ra suggest-experiments --topic "retrieval-free literature agents" -
 Map a field in one run:
 
 ```bash
-uv run gemma-ra map-research-opportunities --topic "agentic retrieval" --professor "Daniel Cohenor" --papers-dir ./papers --verbose
+uv run gemma-ra map-research-opportunities --topic "computer vision" --professor "Daniel CohenOr" --papers-dir ./papers --verbose
 ```
 
 Run a free-form instruction file:

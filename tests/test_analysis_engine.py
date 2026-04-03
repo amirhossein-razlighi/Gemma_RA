@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from gemma_ra.analysis.engine import AnalysisEngine
 from gemma_ra.core.schemas import PaperDocument, PaperMetadata, ResearchContext, TaskType
 from gemma_ra.core.tasks import get_task_spec
@@ -200,4 +202,167 @@ def test_run_instructions_reprompts_when_model_narrates_without_tool_call() -> N
 
     engine.run(TaskType.RUN_INSTRUCTIONS, get_task_spec(TaskType.RUN_INSTRUCTIONS), context)
 
-    assert client.chat_calls == 3
+    assert client.chat_calls == 2
+
+
+def test_run_instructions_reprompts_when_only_thinking_is_present() -> None:
+    class ThinkingOnlyClient:
+        def __init__(self) -> None:
+            self.chat_calls = 0
+
+        def chat(self, messages, tools=None) -> dict:
+            self.chat_calls += 1
+            if self.chat_calls == 1:
+                return {"message": {"role": "assistant", "content": "", "thinking": "I should update config.json.", "tool_calls": []}}
+            return {"message": {"role": "assistant", "content": "FINISHED", "tool_calls": []}}
+
+        def generate_structured(self, prompt: str, schema: dict) -> dict:
+            return {
+                "request": "Tune config until success.",
+                "summary": "Recovered after thinking-only response.",
+                "actions_taken": [],
+                "key_findings": [],
+                "hot_topics": [],
+                "research_opportunities": [],
+                "experiment_suggestions": [],
+                "next_steps": [],
+            }
+
+    client = ThinkingOnlyClient()
+    engine = AnalysisEngine(client, max_iterations=2)
+    context = ResearchContext(task=TaskType.RUN_INSTRUCTIONS, instructions="Tune config.")
+
+    engine.run(TaskType.RUN_INSTRUCTIONS, get_task_spec(TaskType.RUN_INSTRUCTIONS), context)
+
+    assert client.chat_calls == 2
+
+
+def test_inspect_loaded_papers_exposes_ids_and_locations() -> None:
+    reports: list[tuple[str, str]] = []
+
+    class InspectClient:
+        def chat(self, messages, tools=None) -> dict:
+            tool_call = {
+                "function": {
+                    "name": "inspect_loaded_papers",
+                    "arguments": {},
+                }
+            }
+            return {"message": {"role": "assistant", "content": "", "tool_calls": [tool_call]}}
+
+        def generate_structured(self, prompt: str, schema: dict) -> dict:
+            return {
+                "request": "Inspect the currently loaded papers before summarizing them.",
+                "summary": "Inspected the loaded papers.",
+                "actions_taken": ["inspected currently loaded papers"],
+                "key_findings": [],
+                "hot_topics": [],
+                "research_opportunities": [],
+                "experiment_suggestions": [],
+                "next_steps": [],
+            }
+
+    def reporter(kind: str, text: str, end: str = "\n") -> None:
+        reports.append((kind, text))
+
+    engine = AnalysisEngine(InspectClient(), max_iterations=1, reporter=reporter)
+    paper = PaperDocument(
+        metadata=PaperMetadata(
+            paper_id="paper-1",
+            title="Graph neural nets",
+            authors=["Jane Doe"],
+            pdf_url="https://arxiv.org/pdf/paper-1",
+            local_path=Path("/tmp/paper-1.pdf"),
+            source="arxiv",
+        ),
+        content="Graph neural nets for molecules.",
+        sections=[],
+    )
+    context = ResearchContext(
+        task=TaskType.RUN_INSTRUCTIONS,
+        papers=[paper],
+        instructions="Inspect the currently loaded papers before summarizing them.",
+    )
+
+    result = engine.run(TaskType.RUN_INSTRUCTIONS, get_task_spec(TaskType.RUN_INSTRUCTIONS), context)
+
+    assert result.content["request"] == "Inspect the currently loaded papers before summarizing them."
+    tool_results = [text for kind, text in reports if kind == "tool_result"]
+    assert any("paper-1" in text for text in tool_results)
+    assert any("https://arxiv.org/pdf/paper-1" in text for text in tool_results)
+    assert any("/tmp/paper-1.pdf" in text for text in tool_results)
+
+
+def test_fetch_arxiv_full_text_accepts_title_lookup() -> None:
+    fetched: list[str] = []
+
+    class FetchClient:
+        def chat(self, messages, tools=None) -> dict:
+            tool_call = {
+                "function": {
+                    "name": "fetch_arxiv_full_text",
+                    "arguments": {"title": "Sample Paper"},
+                }
+            }
+            return {"message": {"role": "assistant", "content": "", "tool_calls": [tool_call]}}
+
+        def generate_structured(self, prompt: str, schema: dict) -> dict:
+            return {
+                "request": "Fetch the paper PDF before summarizing it.",
+                "summary": "Fetched the full PDF before summarizing.",
+                "actions_taken": ["fetched arXiv full text"],
+                "key_findings": ["The full PDF is now loaded in context."],
+                "hot_topics": [],
+                "research_opportunities": [],
+                "experiment_suggestions": [],
+                "next_steps": [],
+            }
+
+    def fake_fetch(metadata, download_dir):
+        fetched.append(metadata.paper_id)
+        return PaperDocument(
+            metadata=PaperMetadata(
+                paper_id=metadata.paper_id,
+                title=metadata.title,
+                authors=metadata.authors,
+                pdf_url=metadata.pdf_url,
+                local_path=download_dir / f"{metadata.paper_id}.pdf",
+                source="arxiv_pdf",
+            ),
+            content="Full paper text",
+            sections=[],
+        )
+
+    class WorkspaceStub:
+        @staticmethod
+        def resolve_path(path: str) -> Path:
+            return Path("/tmp")
+
+    engine = AnalysisEngine(
+        FetchClient(),
+        arxiv_fetch=fake_fetch,
+        workspace=WorkspaceStub(),
+        max_iterations=1,
+    )
+    context = ResearchContext(
+        task=TaskType.RUN_INSTRUCTIONS,
+        instructions="Fetch the paper PDF before summarizing it.",
+        papers=[
+            PaperDocument(
+                metadata=PaperMetadata(
+                    paper_id="1234.5678v1",
+                    title="Sample Paper",
+                    authors=["Jane Doe"],
+                    pdf_url="https://arxiv.org/pdf/1234.5678v1",
+                    source="arxiv",
+                ),
+                content="Short abstract.",
+                sections=[],
+            )
+        ],
+    )
+
+    engine.run(TaskType.RUN_INSTRUCTIONS, get_task_spec(TaskType.RUN_INSTRUCTIONS), context)
+
+    assert fetched == ["1234.5678v1"]
+    assert context.papers[0].metadata.source == "arxiv_pdf"

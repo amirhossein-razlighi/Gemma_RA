@@ -39,6 +39,7 @@ class ResearchAgent:
         self.analysis_engine = AnalysisEngine(
             OllamaClient(config.ollama),
             arxiv_search=self.arxiv_source.search_and_load,
+            arxiv_fetch=self.arxiv_source.fetch_pdf_document,
             workspace=self.workspace,
             max_iterations=config.executor.max_iterations,
             reporter=reporter,

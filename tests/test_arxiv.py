@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from gemma_ra.sources.arxiv import ArxivPaperSource
 from gemma_ra.core.config import ArxivConfig
+from gemma_ra.core.schemas import PaperMetadata
 
 
 def test_parse_feed_extracts_basic_metadata() -> None:
@@ -59,3 +62,51 @@ def test_search_with_fallbacks_uses_broader_queries_when_needed() -> None:
         'au:"amiri" AND all:"generative ai"',
         'au:"amiri"',
     ]
+
+
+def test_fetch_pdf_document_downloads_and_reads_full_text(tmp_path: Path) -> None:
+    source = ArxivPaperSource(ArxivConfig())
+    metadata = PaperMetadata(
+        paper_id="1234.5678v1",
+        title="Sample Paper",
+        authors=["Jane Doe"],
+        pdf_url="https://arxiv.org/pdf/1234.5678v1",
+        source="arxiv",
+    )
+
+    class FakeResponse:
+        def __init__(self, content: bytes) -> None:
+            self.content = content
+
+        def raise_for_status(self) -> None:
+            return None
+
+    def fake_get(url: str, timeout: float, follow_redirects: bool):
+        assert "1234.5678v1" in url
+        return FakeResponse(b"%PDF-1.4 fake")
+
+    def fake_read(path: Path):
+        return type(
+            "Doc",
+            (),
+            {
+                "metadata": metadata,
+                "content": "Full paper text",
+                "sections": [],
+            },
+        )()
+
+    source.local_source.read = fake_read  # type: ignore[method-assign]
+
+    import gemma_ra.sources.arxiv as arxiv_module
+
+    original_get = arxiv_module.httpx.get
+    arxiv_module.httpx.get = fake_get  # type: ignore[assignment]
+    try:
+        document = source.fetch_pdf_document(metadata, tmp_path)
+    finally:
+        arxiv_module.httpx.get = original_get  # type: ignore[assignment]
+
+    assert document.content == "Full paper text"
+    assert document.metadata.source == "arxiv_pdf"
+    assert document.metadata.local_path == tmp_path / "1234.5678v1.pdf"

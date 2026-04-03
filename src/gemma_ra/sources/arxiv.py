@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from xml.etree import ElementTree
 
 import httpx
@@ -8,6 +9,7 @@ import httpx
 from gemma_ra.core.config import ArxivConfig
 from gemma_ra.core.exceptions import SourceError
 from gemma_ra.core.schemas import PaperDocument, PaperMetadata
+from gemma_ra.sources.local_papers import LocalPaperSource
 
 ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
@@ -15,6 +17,7 @@ ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 class ArxivPaperSource:
     def __init__(self, config: ArxivConfig) -> None:
         self.config = config
+        self.local_source = LocalPaperSource()
 
     def search_and_load(
         self,
@@ -89,6 +92,31 @@ class ArxivPaperSource:
         except httpx.HTTPError as exc:
             raise SourceError(f"Failed to query arXiv for query '{search_query}': {exc}") from exc
         return self._parse_feed(response.text)
+
+    def fetch_pdf_document(self, metadata: PaperMetadata, download_dir: Path) -> PaperDocument:
+        if metadata.pdf_url is None:
+            raise SourceError(f"Paper {metadata.paper_id} does not include a PDF URL.")
+        download_dir.mkdir(parents=True, exist_ok=True)
+        target_path = download_dir / f"{metadata.paper_id}.pdf"
+        try:
+            response = httpx.get(str(metadata.pdf_url), timeout=60.0, follow_redirects=True)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise SourceError(f"Failed to download arXiv PDF for {metadata.paper_id}: {exc}") from exc
+        target_path.write_bytes(response.content)
+        document = self.local_source.read(target_path)
+        document.metadata = PaperMetadata(
+            paper_id=metadata.paper_id,
+            title=metadata.title,
+            authors=metadata.authors,
+            abstract=metadata.abstract,
+            published=metadata.published,
+            updated=metadata.updated,
+            pdf_url=metadata.pdf_url,
+            local_path=target_path,
+            source="arxiv_pdf",
+        )
+        return document
 
     def _parse_feed(self, xml_text: str) -> list[PaperDocument]:
         root = ElementTree.fromstring(xml_text)

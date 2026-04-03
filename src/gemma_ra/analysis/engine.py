@@ -31,6 +31,7 @@ class AnalysisEngine:
         self,
         model_client: OllamaClient,
         arxiv_search=None,
+        arxiv_fetch=None,
         workspace: WorkspaceExecutor | None = None,
         max_iterations: int = 3,
         reporter=None,
@@ -38,6 +39,7 @@ class AnalysisEngine:
     ) -> None:
         self.model_client = model_client
         self.arxiv_search = arxiv_search
+        self.arxiv_fetch = arxiv_fetch
         self.workspace = workspace
         self.max_iterations = max_iterations
         self.reporter = reporter
@@ -192,9 +194,21 @@ class AnalysisEngine:
         if task != TaskType.RUN_INSTRUCTIONS:
             return False
         content = (message.get("content") or "").strip()
+        thinking = (message.get("thinking") or "").strip()
         if content == "FINISHED":
             return False
-        return True
+        return bool(content or thinking)
+
+    @staticmethod
+    def _paper_summary(paper: PaperDocument) -> dict[str, Any]:
+        return {
+            "paper_id": paper.metadata.paper_id,
+            "title": paper.metadata.title,
+            "source": paper.metadata.source,
+            "authors": paper.metadata.authors,
+            "pdf_url": str(paper.metadata.pdf_url) if paper.metadata.pdf_url else None,
+            "local_path": str(paper.metadata.local_path) if paper.metadata.local_path else None,
+        }
 
     def _build_runtime_tools(self, task_spec: TaskSpec, context: ResearchContext) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         tool_specs: list[dict[str, Any]] = []
@@ -215,7 +229,7 @@ class AnalysisEngine:
                     {
                         "papers_added": len(papers),
                         "notes": notes,
-                        "titles": [paper.metadata.title for paper in papers],
+                        "papers": [self._paper_summary(paper) for paper in papers],
                     }
                 )
 
@@ -237,6 +251,70 @@ class AnalysisEngine:
                 }
             )
             tool_impl["search_arxiv_papers"] = search_arxiv_papers
+
+            def fetch_arxiv_full_text(paper_id: str | None = None, title: str | None = None) -> str:
+                if self.arxiv_fetch is None or self.workspace is None:
+                    raise RuntimeError("arXiv full-text fetch is not configured.")
+                if not paper_id and not title:
+                    raise RuntimeError("Provide either paper_id or title.")
+
+                matching = None
+                if paper_id:
+                    matching = next((paper for paper in context.papers if paper.metadata.paper_id == paper_id), None)
+                elif title:
+                    normalized_title = title.strip().casefold()
+                    matches = [
+                        paper
+                        for paper in context.papers
+                        if paper.metadata.title.strip().casefold() == normalized_title
+                    ]
+                    if len(matches) > 1:
+                        raise RuntimeError(
+                            f'Multiple loaded papers match title "{title}". Use paper_id instead.'
+                        )
+                    matching = matches[0] if matches else None
+                if matching is None:
+                    if paper_id:
+                        raise RuntimeError(f"Paper id {paper_id} is not currently loaded in context.")
+                    raise RuntimeError(f'Paper title "{title}" is not currently loaded in context.')
+                document = self.arxiv_fetch(matching.metadata, self.workspace.resolve_path(".") / "arxiv_papers")
+                existing_ids = {paper.metadata.paper_id for paper in context.papers}
+                if document.metadata.paper_id not in existing_ids:
+                    context.papers.append(document)
+                else:
+                    for index, paper in enumerate(context.papers):
+                        if paper.metadata.paper_id == document.metadata.paper_id:
+                            context.papers[index] = document
+                            break
+                note = f'Fetched full PDF text for "{document.metadata.title}".'
+                context.discovery_notes.append(note)
+                return str(
+                    {
+                        "paper_id": document.metadata.paper_id,
+                        "title": document.metadata.title,
+                        "local_path": str(document.metadata.local_path) if document.metadata.local_path else None,
+                        "content_chars": len(document.content),
+                        "note": note,
+                    }
+                )
+
+            tool_specs.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "fetch_arxiv_full_text",
+                        "description": "Download and parse the full PDF for an arXiv paper already present in context, then add its full text to the working set.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "paper_id": {"type": "string"},
+                                "title": {"type": "string"},
+                            },
+                        },
+                    },
+                }
+            )
+            tool_impl["fetch_arxiv_full_text"] = fetch_arxiv_full_text
 
         if "local_pdf_reader" in task_spec.allowed_tools:
             def load_local_papers(directory: str | None = None, limit: int = 10) -> str:
@@ -262,16 +340,7 @@ class AnalysisEngine:
                 return str({"papers_added": len(added_titles), "titles": added_titles, "note": note})
 
             def inspect_loaded_papers() -> str:
-                return str(
-                    [
-                        {
-                            "title": paper.metadata.title,
-                            "source": paper.metadata.source,
-                            "authors": paper.metadata.authors,
-                        }
-                        for paper in context.papers
-                    ]
-                )
+                return str([self._paper_summary(paper) for paper in context.papers])
 
             tool_specs.append(
                 {

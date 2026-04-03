@@ -23,6 +23,8 @@ def _run_task(
     paper_paths: list[Path],
     config_path: Path | None,
     output_dir: Path | None,
+    instructions: str | None = None,
+    instructions_path: Path | None = None,
 ) -> None:
     config = load_config(config_path)
     agent = ResearchAgent(config)
@@ -35,6 +37,8 @@ def _run_task(
                 papers_dir=papers_dir,
                 paper_paths=paper_paths,
                 output_dir=output_dir,
+                instructions=instructions,
+                instructions_path=instructions_path,
             )
         )
     except GemmaRAError as exc:
@@ -65,6 +69,10 @@ CommonConfig = Annotated[
 CommonOutput = Annotated[
     Path | None,
     typer.Option(help="Override output directory for generated markdown/json artifacts."),
+]
+CommonInstructions = Annotated[
+    Path,
+    typer.Option(help="Path to a free-form instruction file.", dir_okay=False),
 ]
 
 
@@ -154,4 +162,32 @@ def map_research_opportunities(
         paper,
         config,
         output_dir,
+    )
+
+
+@app.command("run-instructions")
+def run_instructions(
+    instructions_file: CommonInstructions = Path("INSTRUCTIONS.md"),
+    topic: CommonTopic = None,
+    professor: CommonProfessors = [],
+    papers_dir: CommonPapersDir = None,
+    paper: CommonPaper = [],
+    config: CommonConfig = None,
+    output_dir: CommonOutput = None,
+) -> None:
+    """Read INSTRUCTIONS.md, let the model choose tools, and write a structured result."""
+    if not instructions_file.exists():
+        console.print(f"[red]Error:[/red] Instructions file not found: {instructions_file}")
+        raise typer.Exit(code=1)
+    instructions = instructions_file.read_text().strip()
+    _run_task(
+        TaskType.RUN_INSTRUCTIONS,
+        topic,
+        professor,
+        papers_dir,
+        paper,
+        config,
+        output_dir,
+        instructions=instructions,
+        instructions_path=instructions_file,
     )

@@ -1,0 +1,15 @@
+ollama:
+  host: "http://localhost:11434"
+  model: "gemma4"
+  timeout_seconds: 120
+arxiv:
+  base_url: "https://export.arxiv.org/api/query"
+  max_results: 5
+  sort_by: "submittedDate"
+  sort_order: "descending"
+executor:
+  workspace_root: "./examples/regression_task"
+  max_iterations: 12
+  command_timeout_seconds: 120
+papers_dir: "./papers"
+output_dir: "./outputs"

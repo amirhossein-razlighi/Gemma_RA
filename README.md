@@ -1,16 +1,16 @@
 # Gemma_RA
 
-Open-source research assistant and experiment loop for Gemma on Ollama.
+Open-source research assistant and experiment loop for Gemma4 on Ollama.
 
 Gemma_RA can read papers, search arXiv, synthesize literature, propose research directions, and execute constrained workspace experiments from a free-form `INSTRUCTIONS.md`.
 
 ## TL;DR
 
-- Local-first research assistant powered by Gemma via Ollama
+- Local-first research assistant powered by Gemma4 via Ollama
 - Reads local PDFs and searches arXiv by professor name
 - Produces structured outputs for summaries, reviews, ideas, and experiment plans
 - Can run code, inspect logs, edit files, and iterate inside a constrained workspace
-- Ships with a demo where the agent tunes a regression task until it succeeds
+- Look at the demo where the agent tunes a regression task until it succeeds!
 
 ## Why This Is Fun
 
@@ -20,7 +20,7 @@ Gemma_RA can read papers, search arXiv, synthesize literature, propose research 
 - Outputs are both human-readable Markdown and machine-readable JSON
 - Verbose mode lets you watch the loop think, call tools, run code, and react to logs
 
-## v0.1.0 Highlight
+## First version Highlights
 
 The bundled regression demo starts from a failing setup and lets the agent iterate until success:
 
@@ -58,7 +58,7 @@ See the final run artifact in [examples/regression_task/logs/latest.json](/Users
 - Python 3.11+
 - [uv](https://github.com/astral-sh/uv)
 - [Ollama](https://ollama.com/)
-- A local Gemma model available in Ollama
+- A local Gemma4 model available in Ollama
 
 Example:
 

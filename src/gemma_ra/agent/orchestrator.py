@@ -30,16 +30,19 @@ class RunRequest:
 
 
 class ResearchAgent:
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, config: AppConfig, reporter=None, stream_chat: bool = False) -> None:
         self.config = config
         self.tool_registry = ToolRegistry.default()
         self.local_source = LocalPaperSource()
         self.arxiv_source = ArxivPaperSource(config.arxiv)
+        self.workspace = WorkspaceExecutor(config.executor)
         self.analysis_engine = AnalysisEngine(
             OllamaClient(config.ollama),
             arxiv_search=self.arxiv_source.search_and_load,
-            workspace=WorkspaceExecutor(config.executor),
+            workspace=self.workspace,
             max_iterations=config.executor.max_iterations,
+            reporter=reporter,
+            stream_chat=stream_chat,
         )
 
     def run(self, request: RunRequest) -> ArtifactRecord:
@@ -93,3 +96,6 @@ class ResearchAgent:
             instructions=request.instructions,
             instructions_path=request.instructions_path,
         )
+
+    def shutdown(self) -> None:
+        self.workspace.terminate_all()

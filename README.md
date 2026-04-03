@@ -118,31 +118,31 @@ uv run gemma-ra analyze-paper --paper ./papers/example.pdf
 Review a topic from local PDFs:
 
 ```bash
-uv run gemma-ra review-topic --topic "graph representation learning" --papers-dir ./papers
+uv run gemma-ra review-topic --topic "graph representation learning" --papers-dir ./papers --verbose
 ```
 
 Find papers by professor name on arXiv:
 
 ```bash
-uv run gemma-ra find-papers --topic "multimodal reasoning" --professor "Percy Liang"
+uv run gemma-ra find-papers --topic "computer graphics" --professor "Ali Mahdavi Amiri" --verbose
 ```
 
 Generate research ideas:
 
 ```bash
-uv run gemma-ra generate-ideas --topic "small-model agents" --professor "Yejin Choi"
+uv run gemma-ra generate-ideas --topic "small-model agents" --professor "Yejin Choi" --verbose
 ```
 
 Suggest lightweight experiments:
 
 ```bash
-uv run gemma-ra suggest-experiments --topic "retrieval-free literature agents" --papers-dir ./papers
+uv run gemma-ra suggest-experiments --topic "retrieval-free literature agents" --papers-dir ./papers --verbose
 ```
 
 Map a field in one run:
 
 ```bash
-uv run gemma-ra map-research-opportunities --topic "agentic retrieval" --professor "Percy Liang"
+uv run gemma-ra map-research-opportunities --topic "agentic retrieval" --professor "Daniel Cohenor" --papers-dir ./papers --verbose
 ```
 
 Run a free-form instruction file:

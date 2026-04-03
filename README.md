@@ -1,32 +1,57 @@
 # Gemma_RA
 
-Gemma_RA is a CLI-first research assistant agent for on-device workflows using Gemma through Ollama. It can read local PDFs, discover recent papers on arXiv by professor name, and turn those sources into structured paper analyses, literature reviews, research ideas, and lightweight experiment suggestions.
+Open-source research assistant and experiment loop for Gemma on Ollama.
 
-## What v1 does
+Gemma_RA can read papers, search arXiv, synthesize literature, propose research directions, and execute constrained workspace experiments from a free-form `INSTRUCTIONS.md`.
 
-- Analyze a local paper into problem, inputs, method, outputs, ideas, contributions, and limitations
+## TL;DR
+
+- Local-first research assistant powered by Gemma via Ollama
+- Reads local PDFs and searches arXiv by professor name
+- Produces structured outputs for summaries, reviews, ideas, and experiment plans
+- Can run code, inspect logs, edit files, and iterate inside a constrained workspace
+- Ships with a demo where the agent tunes a regression task until it succeeds
+
+## Why This Is Fun
+
+- `INSTRUCTIONS.md` as the interface: write what you want, let the agent choose tools
+- Same runtime can do paper work and code work
+- Tool use is constrained to a configured workspace root
+- Outputs are both human-readable Markdown and machine-readable JSON
+- Verbose mode lets you watch the loop think, call tools, run code, and react to logs
+
+## v0.1.0 Highlight
+
+The bundled regression demo starts from a failing setup and lets the agent iterate until success:
+
+- initial loss: `16.7727`
+- final loss: `0.0000803726`
+- final config: `learning_rate=0.005`, `epochs=500`
+- success criterion: `final_loss <= 0.005`
+
+That result came from the agent reading the code, running training, reading logs, changing hyperparameters, and rerunning until the target was met.
+
+See the final run artifact in [examples/regression_task/logs/latest.json](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/logs/latest.json).
+
+## What It Can Do
+
+- Analyze a paper into problem, inputs, method, outputs, ideas, contributions, and limitations
 - Review a topic from local papers or professor-based arXiv discovery
 - Find recent papers from arXiv and explain why they matter
-- Generate possible research directions grounded in the supplied papers
-- Suggest small experiments to test whether an idea is worth pursuing
-- Map a field end-to-end from seed professors and papers to novel research opportunities
-- Read a root `INSTRUCTIONS.md`, choose tools, and execute a broader autonomous research workflow
+- Generate grounded research ideas from papers
+- Suggest lightweight experiments to test those ideas
+- Map a field end-to-end from seed professors and papers to novel opportunities
+- Read `INSTRUCTIONS.md`, choose tools, run experiments, inspect logs, and keep iterating
 
-The codebase is intentionally extensible. Tasks are defined in Python, tools are registry-driven, and the orchestration loop is designed so future experiment-running tools can plug in without rewriting the core architecture.
+## Project Layout
 
-The runtime now uses two model interaction modes:
-
-- structured JSON generation for final task outputs
-- Ollama chat tool calling for source discovery before the final synthesis pass
-
-## Project layout
-
-- `src/gemma_ra/agent`: orchestration, skill loading, and tool registry
+- `src/gemma_ra/cli.py`: CLI entrypoints
+- `src/gemma_ra/agent`: orchestration and tool registry
 - `src/gemma_ra/sources`: local PDF ingestion and arXiv search
-- `src/gemma_ra/analysis`: prompt assembly, structured model calls, and markdown rendering
-- `src/gemma_ra/core`: config, schemas, artifacts, exceptions, the Ollama client, and constrained workspace execution
-- `src/gemma_ra/core/tasks.py`: code-defined task behavior and prompt templates
-- `tests/`: unit and integration-style tests with mocked model boundaries
+- `src/gemma_ra/analysis`: tool loop, prompting, structured outputs, rendering
+- `src/gemma_ra/core`: config, schemas, artifacts, model client, workspace executor, task specs
+- `examples/regression_task`: runnable demo for autonomous hyperparameter tuning
+- `tests`: unit and integration-style tests
 
 ## Requirements
 
@@ -48,7 +73,7 @@ uv venv
 uv sync --extra dev
 ```
 
-The default config lives in `gemma_ra.yaml`:
+Default config in `gemma_ra.yaml`:
 
 ```yaml
 ollama:
@@ -62,9 +87,27 @@ papers_dir: "./papers"
 output_dir: "./outputs"
 ```
 
-You can edit that file or pass `--config /path/to/config.yaml` to any command.
+## Fastest Demo
 
-## CLI usage
+Watch the agent tune a toy regression project until it succeeds:
+
+```bash
+uv run gemma-ra run-instructions \
+  --instructions-file examples/regression_task/INSTRUCTIONS.md \
+  --config examples/regression_task/gemma_ra.example.yaml \
+  --verbose
+```
+
+What happens:
+
+1. The agent reads [examples/regression_task/INSTRUCTIONS.md](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/INSTRUCTIONS.md)
+2. It inspects the workspace files
+3. It runs [examples/regression_task/train.py](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/train.py) with `uv run python`
+4. It reads [examples/regression_task/logs/latest.json](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/logs/latest.json)
+5. It edits [examples/regression_task/config.json](/Users/amirhossein/Documents/Programming/Gemma_RA/examples/regression_task/config.json)
+6. It reruns until the target loss is achieved
+
+## CLI Examples
 
 Analyze a local paper:
 
@@ -105,34 +148,37 @@ uv run gemma-ra map-research-opportunities --topic "agentic retrieval" --profess
 Run a free-form instruction file:
 
 ```bash
-uv run gemma-ra run-instructions --instructions-file ./INSTRUCTIONS.md
+uv run gemma-ra run-instructions --instructions-file ./INSTRUCTIONS.md --verbose
 ```
+
+## Constrained Tooling
+
+`run-instructions` can use constrained workspace tools to:
+
+- list files under a configured workspace root
+- read workspace files and logs
+- write workspace files
+- update JSON fields like hyperparameters
+- run Python scripts through `uv run python`
+
+These tools are intentionally limited to the configured workspace root, and the loop is capped by `executor.max_iterations`.
+
+## Outputs
 
 Each run writes:
 
-- Markdown output for reading
-- JSON output for downstream tooling
+- a Markdown artifact for humans
+- a JSON artifact for downstream tooling
 
 By default artifacts are stored under `./outputs`.
 
-For `find-papers`, the system now tries broader arXiv fallbacks when an exact author-plus-topic query is empty, and includes a search trace in the output when no strong matches are found.
+## Notes
 
-For `run-instructions`, the model can now use constrained workspace tools to:
-
-- list files under a specified workspace root
-- read workspace files and logs
-- write workspace files
-- run Python scripts through `uv run python`
-
-Those tools are intentionally limited to the configured workspace root, and the tool loop is capped by `executor.max_iterations` rather than running forever.
-
-## Notes on scope
-
-- v1 uses Ollama as the only model backend.
-- Online paper discovery is arXiv-only for now.
-- Local PDF ingestion assumes text-extractable PDFs rather than OCR.
-- Future work can add experiment execution, code-running tools, hyperparameter loops, and result analysis through the existing tool and artifact interfaces.
-- arXiv API requests use `https://export.arxiv.org/api/query`.
+- Ollama is the only model backend in v0.1.0
+- Online paper discovery is arXiv-only for now
+- Local PDF ingestion assumes text-extractable PDFs, not OCR
+- arXiv API requests use `https://export.arxiv.org/api/query`
+- The agent can execute iterative experiment loops, but only inside the configured workspace root
 
 ## Testing
 

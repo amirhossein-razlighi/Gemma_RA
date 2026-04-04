@@ -477,6 +477,158 @@ def test_read_loaded_paper_content_exposes_parsed_text_to_tool_loop() -> None:
     assert any("message passing for molecular graphs" in text for text in tool_results)
 
 
+def test_partial_paper_read_reprompts_instead_of_stopping() -> None:
+    class PartialReadClient:
+        def __init__(self) -> None:
+            self.chat_calls = 0
+            self.third_messages = []
+
+        def chat(self, messages, tools=None) -> dict:
+            self.chat_calls += 1
+            if self.chat_calls == 1:
+                return {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "read_loaded_paper_content",
+                                    "arguments": {"paper_id": "paper-1", "max_chars": 20, "offset": 0},
+                                }
+                            }
+                        ],
+                    }
+                }
+            if self.chat_calls == 2:
+                return {
+                    "message": {
+                        "role": "assistant",
+                        "content": "I will wait for the user to provide the next section.",
+                        "tool_calls": [],
+                    }
+                }
+            self.third_messages = messages
+            return {"message": {"role": "assistant", "content": "READY", "tool_calls": []}}
+
+        def generate_structured(self, prompt: str, schema: dict) -> dict:
+            return {
+                "problem": "Predict molecular properties.",
+                "inputs": ["Molecular graphs"],
+                "processing": "Encode graph structure and aggregate message passing features.",
+                "outputs": ["Property predictions"],
+                "key_ideas": ["Use message passing"],
+                "contributions": ["Strong benchmark results"],
+                "limitations": ["Needs labeled data"],
+            }
+
+    client = PartialReadClient()
+    engine = AnalysisEngine(client, max_iterations=3)
+    paper = PaperDocument(
+        metadata=PaperMetadata(
+            paper_id="paper-1",
+            title="Graph neural nets",
+            authors=["Jane Doe"],
+            source="local",
+        ),
+        content="This paper introduces message passing for molecular graphs and discusses experiments in detail.",
+        sections=[],
+    )
+    context = ResearchContext(task=TaskType.ANALYZE_PAPER, papers=[paper])
+
+    engine.run(TaskType.ANALYZE_PAPER, get_task_spec(TaskType.ANALYZE_PAPER), context)
+
+    assert client.chat_calls == 3
+    followup_prompt = next(
+        message["content"]
+        for message in reversed(client.third_messages)
+        if message.get("role") == "user" and "Do not wait for the user" in message.get("content", "")
+    )
+    assert "Call `read_loaded_paper_content(" in followup_prompt
+    assert "paper-1" in followup_prompt
+    assert "Graph neural nets" in followup_prompt
+    assert "offset=20" in followup_prompt
+
+
+def test_completed_paper_read_reprompts_for_next_concrete_paper_action() -> None:
+    class CompletedReadClient:
+        def __init__(self) -> None:
+            self.chat_calls = 0
+            self.third_messages = []
+
+        def chat(self, messages, tools=None) -> dict:
+            self.chat_calls += 1
+            if self.chat_calls == 1:
+                return {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "read_loaded_paper_content",
+                                    "arguments": {"paper_id": "paper-1", "max_chars": 200, "offset": 0},
+                                }
+                            }
+                        ],
+                    }
+                }
+            if self.chat_calls == 2:
+                return {
+                    "message": {
+                        "role": "assistant",
+                        "content": "I should probably wait for more context before continuing.",
+                        "tool_calls": [],
+                    }
+                }
+            self.third_messages = messages
+            return {"message": {"role": "assistant", "content": "READY", "tool_calls": []}}
+
+        def generate_structured(self, prompt: str, schema: dict) -> dict:
+            return {
+                "topic": "graph learning",
+                "ideas": [
+                    {
+                        "title": "Solving long-range dependency drift in graph representation learning",
+                        "problem_targeted": "Message passing models weaken on long-range dependencies.",
+                        "motivation": "Shallow locality still dominates many graph pipelines.",
+                        "novelty_rationale": "Correction mechanisms for long-range structural drift are still underexplored.",
+                        "grounding": "The loaded paper gives a message-passing baseline but leaves long-range robustness open.",
+                        "expected_contribution": "A more stable graph encoder for long-range structure.",
+                        "related_papers": ["Graph neural nets"],
+                        "proposed_method": "Introduce a memory or correction module on top of message passing.",
+                        "risks": ["Higher compute cost"],
+                    }
+                ],
+            }
+
+    client = CompletedReadClient()
+    engine = AnalysisEngine(client, max_iterations=3)
+    paper = PaperDocument(
+        metadata=PaperMetadata(
+            paper_id="paper-1",
+            title="Graph neural nets",
+            authors=["Jane Doe"],
+            source="local",
+        ),
+        content="Short paper content that fits in one read.",
+        sections=[],
+    )
+    context = ResearchContext(task=TaskType.GENERATE_IDEAS, topic="graph learning", papers=[paper])
+
+    engine.run(TaskType.GENERATE_IDEAS, get_task_spec(TaskType.GENERATE_IDEAS), context)
+
+    assert client.chat_calls == 3
+    followup_prompt = next(
+        message["content"]
+        for message in reversed(client.third_messages)
+        if message.get("role") == "user" and "internal tool loop" in message.get("content", "")
+    )
+    assert 'finished reading "Graph neural nets"' in followup_prompt
+    assert "fetch/read another relevant paper" in followup_prompt
+    assert "reply exactly with READY" in followup_prompt
+
+
 def test_non_instruction_tasks_report_internal_tool_loop_completion() -> None:
     reports: list[tuple[str, str]] = []
 
@@ -689,3 +841,46 @@ def test_next_action_instruction_prefers_config_edits_after_failed_metrics() -> 
     assert "adjust `learning_rate`" in prompt
     assert "increase `epochs`" in prompt
     assert "run_uv_python" in prompt
+
+
+def test_generate_ideas_prompt_discourages_generic_topic_labels() -> None:
+    class IdeasClient:
+        def chat(self, messages, tools=None) -> dict:
+            return {"message": {"role": "assistant", "content": "READY", "tool_calls": []}}
+
+        def generate_structured(self, prompt: str, schema: dict) -> dict:
+            assert "Do not propose broad area labels" in prompt
+            assert "Title each idea like a real project or challenge" in prompt
+            return {
+                "topic": "video segmentation",
+                "ideas": [
+                    {
+                        "title": "Solving temporal drift in interactive video segmentation",
+                        "problem_targeted": "Mask quality drifts over long videos after sparse user corrections.",
+                        "motivation": "Current methods accumulate temporal errors.",
+                        "novelty_rationale": "Long-horizon correction propagation remains underexplored.",
+                        "grounding": "Recent video segmentation papers improve promptability but still struggle with temporal consistency.",
+                        "expected_contribution": "A correction-aware propagation scheme that preserves masks over long time spans.",
+                        "related_papers": ["Graph neural nets"],
+                        "proposed_method": "Learn a memory mechanism for correction-conditioned mask updates.",
+                        "risks": ["Added memory may slow inference"],
+                    }
+                ],
+            }
+
+    engine = AnalysisEngine(IdeasClient())
+    paper = PaperDocument(
+        metadata=PaperMetadata(
+            paper_id="paper-1",
+            title="Graph neural nets",
+            authors=["Jane Doe"],
+            source="local",
+        ),
+        content="Paper text.",
+        sections=[],
+    )
+    context = ResearchContext(task=TaskType.GENERATE_IDEAS, topic="video segmentation", papers=[paper])
+
+    result = engine.run(TaskType.GENERATE_IDEAS, get_task_spec(TaskType.GENERATE_IDEAS), context)
+
+    assert result.content["ideas"][0]["title"].startswith("Solving temporal drift")

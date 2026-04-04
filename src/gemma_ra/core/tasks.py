@@ -103,6 +103,9 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
             "Every idea should connect to at least one supplied paper.",
             "Explain why each idea may be novel or underexplored.",
             "State clearly what problem each idea targets, how it is grounded in the papers, and what contribution it could make.",
+            "Do not propose broad area labels like 'semantic segmentation' or 'graph representation learning' as ideas.",
+            "Each idea should be a concrete open problem or research direction, for example 'solving X under Y constraint' or 'making Z robust to W'.",
+            "Make the novelty come from what is still missing, brittle, inefficient, or unexplored in the supplied papers.",
         ],
         prompt_template=(
             "You are proposing grounded research directions based on a set of papers.\n"
@@ -110,7 +113,9 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
             "Topic: {topic}\n"
             "Professors: {professors}\n"
             "Constraints:\n{constraints}\n\n"
-            "For each idea, explain the concrete problem, the grounding in prior work, the expected contribution, and the proposed method.\n\n"
+            "For each idea, explain the concrete problem, the open gap it addresses, the grounding in prior work, the expected contribution, and the proposed method.\n"
+            "Title each idea like a real project or challenge, not a generic field name.\n"
+            "Good idea titles sound like 'Solving occlusion-aware few-shot video segmentation' or 'Making graph retrieval robust to noisy citations', not 'video segmentation' or 'graph retrieval'.\n\n"
             "Source papers:\n{papers}\n"
         ),
     ),
@@ -154,6 +159,8 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
             "Ground every opportunity in the supplied papers and discovered research threads.",
             "Prefer concrete, testable, near-term research directions over vague moonshots.",
             "For each opportunity and experiment, explain the target problem, grounding in prior work, and expected contribution or signal.",
+            "Do not name an opportunity with a broad area label like 'semantic segmentation' or '3D generation'.",
+            "Each opportunity should read like a specific unsolved problem or challenge inside the field.",
         ],
         prompt_template=(
             "You are mapping a research field for a scientist looking for the next novel project.\n"
@@ -169,6 +176,8 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
             "4. surface concrete open problems,\n"
             "5. propose novel but plausible research opportunities,\n"
             "6. suggest lightweight experiments to validate them.\n\n"
+            "The opportunities should be framed as concrete open problems left unresolved by the literature, not as generic topic names.\n"
+            "Prefer titles like 'Solving temporal drift in interactive video segmentation' over titles like 'video segmentation'.\n\n"
             "Papers:\n{papers}\n"
         ),
     ),
@@ -192,6 +201,7 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
             "Be explicit about what you actually searched or loaded.",
             "If the instructions define success criteria, do not stop until they are satisfied or you have exhausted the iteration budget.",
             "If you decide something should be changed in a file, call a tool to do it instead of only describing the intended change.",
+            "When proposing research opportunities, do not output generic field labels; propose concrete open problems with a novelty angle.",
         ],
         prompt_template=(
             "You are a research assistant operating from a free-form instruction file.\n"
@@ -204,6 +214,7 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
             "Known professors: {professors}\n"
             "Requested sections: {output_sections}\n"
             "Constraints:\n{constraints}\n\n"
+            "If you propose research ideas or opportunities, make them concrete unsolved problems such as 'solving X under Y constraint' rather than broad topic labels.\n\n"
             "Discovered papers and context:\n{papers}\n"
         ),
     ),

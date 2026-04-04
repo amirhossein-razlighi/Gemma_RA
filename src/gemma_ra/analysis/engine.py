@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from typing import Any
 
@@ -122,7 +123,8 @@ class AnalysisEngine:
                     "This tool loop is an internal gather phase for a non-interactive CLI run. "
                     "Do not ask the user follow-up questions, do not present final findings, and do not offer optional next steps here. "
                     "When you have enough context, reply exactly with READY and no tool calls. "
-                    "If a paper is already loaded and the task is to analyze or review it, do not ask the user for clarification before reading the available paper content."
+                    "If a paper is already loaded and the task is to analyze or review it, do not ask the user for clarification before reading the available paper content. "
+                    "When reading paper text, prefer larger chunks so you can see method and experiment details in one pass; use around 20000-30000 characters unless you have a strong reason to read less."
                 ),
             },
             {
@@ -176,6 +178,16 @@ class AnalysisEngine:
                             ),
                         }
                     )
+                    continue
+                paper_action_prompt = self._paper_explicit_action_prompt(task=task, message=message, messages=messages)
+                if paper_action_prompt:
+                    self._report("agent", "model described a paper next step without a concrete tool; requesting an explicit paper action")
+                    messages.append({"role": "user", "content": paper_action_prompt})
+                    continue
+                paper_followup = self._paper_followup_prompt(task=task, messages=messages)
+                if paper_followup:
+                    self._report("agent", "model stopped after a partial paper read; requesting an explicit next paper action")
+                    messages.append({"role": "user", "content": paper_followup})
                     continue
                 if task != TaskType.RUN_INSTRUCTIONS:
                     self._report("agent", "tool loop complete; proceeding to structured synthesis")
@@ -237,6 +249,14 @@ class AnalysisEngine:
                     )
                     if anti_loop_prompt:
                         messages.append({"role": "user", "content": anti_loop_prompt})
+                else:
+                    paper_next_action_prompt = self._paper_next_action_instruction(
+                        task=task,
+                        tool_name=name,
+                        result=result,
+                    )
+                    if paper_next_action_prompt:
+                        messages.append({"role": "user", "content": paper_next_action_prompt})
                 guidance_messages = self._drain_interactive_guidance()
                 if guidance_messages:
                     for guidance in guidance_messages:
@@ -262,6 +282,148 @@ class AnalysisEngine:
         if content == "FINISHED":
             return False
         return bool(content or thinking)
+
+    @staticmethod
+    def _paper_explicit_action_prompt(task: TaskType, message: dict[str, Any], messages: list[dict[str, Any]]) -> str | None:
+        if task not in {
+            TaskType.ANALYZE_PAPER,
+            TaskType.REVIEW_TOPIC,
+            TaskType.FIND_PAPERS,
+            TaskType.GENERATE_IDEAS,
+            TaskType.SUGGEST_EXPERIMENTS,
+            TaskType.MAP_RESEARCH_OPPORTUNITIES,
+        }:
+            return None
+        content = (message.get("content") or "").strip()
+        thinking = (message.get("thinking") or "").strip()
+        if content == "READY":
+            return None
+        if not (content or thinking):
+            return None
+        for prior in reversed(messages[:-1]):
+            if prior.get("role") != "tool":
+                continue
+            tool_name = prior.get("tool_name")
+            payload = AnalysisEngine._parse_tool_payload(prior.get("content", ""))
+            if tool_name == "read_loaded_paper_content" and isinstance(payload, dict):
+                paper = payload.get("paper") if isinstance(payload.get("paper"), dict) else {}
+                paper_id = paper.get("paper_id")
+                title = paper.get("title")
+                remaining = payload.get("remaining_chars")
+                if isinstance(remaining, int) and remaining > 0:
+                    return (
+                        "This is an internal tool loop, so do not narrate what you might do next. "
+                        f'You are currently reading "{title or paper_id or "the current paper"}". '
+                        "Call the next paper tool now. "
+                        "Either continue the same paper with `read_loaded_paper_content(...)`, "
+                        "or take another concrete paper-analysis action if you truly have enough evidence."
+                    )
+                return (
+                    "This is an internal tool loop, so do not narrate what you might do next. "
+                    f'You have finished reading "{title or paper_id or "the current paper"}". '
+                    "Now either fetch/read another relevant paper, inspect the loaded papers to choose the next one, or reply exactly with READY if you already have enough context for synthesis."
+                )
+            if tool_name == "fetch_arxiv_full_text" and isinstance(payload, dict):
+                paper_id = payload.get("paper_id")
+                title = payload.get("title")
+                return (
+                    "This is an internal tool loop, so do not narrate what you might do next. "
+                    f'You just fetched full text for "{title or paper_id or "a paper"}". '
+                    "Call the next paper tool now: either read this paper with `read_loaded_paper_content(...)`, fetch another important paper, or reply exactly with READY if you already have enough context."
+                )
+            break
+        return (
+            "This is an internal tool loop, so do not narrate what you might do next. "
+            "Call a concrete paper-related tool now, or reply exactly with READY if you already have enough context."
+        )
+
+    @staticmethod
+    def _paper_next_action_instruction(task: TaskType, tool_name: str, result: Any) -> str | None:
+        if task not in {
+            TaskType.ANALYZE_PAPER,
+            TaskType.REVIEW_TOPIC,
+            TaskType.FIND_PAPERS,
+            TaskType.GENERATE_IDEAS,
+            TaskType.SUGGEST_EXPERIMENTS,
+            TaskType.MAP_RESEARCH_OPPORTUNITIES,
+        }:
+            return None
+        if tool_name != "read_loaded_paper_content":
+            return None
+        payload = AnalysisEngine._parse_tool_payload(result)
+        if not isinstance(payload, dict):
+            return None
+        remaining = payload.get("remaining_chars")
+        paper = payload.get("paper") if isinstance(payload.get("paper"), dict) else {}
+        paper_id = paper.get("paper_id")
+        title = paper.get("title")
+        current_offset = payload.get("offset")
+        returned_chars = payload.get("returned_chars")
+        next_offset = None
+        if isinstance(current_offset, int) and isinstance(returned_chars, int):
+            next_offset = current_offset + returned_chars
+        if isinstance(remaining, int) and remaining > 0:
+            return (
+                f'You have only read part of the paper "{title or paper_id or "current paper"}". '
+                f"There are still {remaining} unread characters remaining. "
+                "Do not stop or wait for the user yet. "
+                f"Continue the same paper by calling `read_loaded_paper_content(paper_id={paper_id!r}, title={title!r}, offset={next_offset}, max_chars=24000)` "
+                "to read the next chunk, "
+                "or, if you already have enough evidence from the paper text, continue with another concrete paper-analysis tool action."
+            )
+        return None
+
+    @staticmethod
+    def _paper_followup_prompt(task: TaskType, messages: list[dict[str, Any]]) -> str | None:
+        if task not in {
+            TaskType.ANALYZE_PAPER,
+            TaskType.REVIEW_TOPIC,
+            TaskType.FIND_PAPERS,
+            TaskType.GENERATE_IDEAS,
+            TaskType.SUGGEST_EXPERIMENTS,
+            TaskType.MAP_RESEARCH_OPPORTUNITIES,
+        }:
+            return None
+        for message in reversed(messages):
+            if message.get("role") != "tool":
+                continue
+            if message.get("tool_name") != "read_loaded_paper_content":
+                return None
+            payload = AnalysisEngine._parse_tool_payload(message.get("content", ""))
+            if not isinstance(payload, dict):
+                return None
+            remaining = payload.get("remaining_chars")
+            paper = payload.get("paper") if isinstance(payload.get("paper"), dict) else {}
+            paper_id = paper.get("paper_id")
+            title = paper.get("title")
+            current_offset = payload.get("offset")
+            returned_chars = payload.get("returned_chars")
+            next_offset = None
+            if isinstance(current_offset, int) and isinstance(returned_chars, int):
+                next_offset = current_offset + returned_chars
+            if isinstance(remaining, int) and remaining > 0:
+                return (
+                    f'You just read only part of the loaded paper "{title or paper_id or "current paper"}" and there is more paper text remaining. '
+                    "Do not wait for the user. "
+                    f"Call `read_loaded_paper_content(paper_id={paper_id!r}, title={title!r}, offset={next_offset}, max_chars=24000)` to continue the same paper, "
+                    "or move directly to the next concrete analysis action if you already have enough evidence."
+                )
+            return None
+        return None
+
+    @staticmethod
+    def _parse_tool_payload(result: Any) -> Any:
+        if isinstance(result, dict):
+            return result
+        if not isinstance(result, str):
+            return None
+        try:
+            return json.loads(result)
+        except json.JSONDecodeError:
+            try:
+                return ast.literal_eval(result)
+            except (ValueError, SyntaxError):
+                return None
 
     @staticmethod
     def _paper_summary(paper: PaperDocument) -> dict[str, Any]:
@@ -409,7 +571,7 @@ class AnalysisEngine:
             def read_loaded_paper_content(
                 paper_id: str | None = None,
                 title: str | None = None,
-                max_chars: int = 12_000,
+                max_chars: int = 24_000,
                 offset: int = 0,
             ) -> str:
                 if not paper_id and not title:
@@ -492,7 +654,7 @@ class AnalysisEngine:
                     "type": "function",
                     "function": {
                         "name": "read_loaded_paper_content",
-                        "description": "Read the parsed content of a currently loaded paper. Use this after loading or fetching a PDF when you need the actual paper text, not just metadata.",
+                        "description": "Read the parsed content of a currently loaded paper. Use this after loading or fetching a PDF when you need the actual paper text, not just metadata. Prefer larger chunks around 20000-30000 characters for methods and experiments.",
                         "parameters": {
                             "type": "object",
                             "properties": {

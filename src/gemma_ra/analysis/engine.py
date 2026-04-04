@@ -12,6 +12,7 @@ from gemma_ra.core.schemas import (
     InstructionRunResult,
     LiteratureReview,
     PaperAnalysis,
+    PaperDigest,
     PaperDocument,
     ReviewPaperSummary,
     ResearchContext,
@@ -124,7 +125,9 @@ class AnalysisEngine:
                     "Do not ask the user follow-up questions, do not present final findings, and do not offer optional next steps here. "
                     "When you have enough context, reply exactly with READY and no tool calls. "
                     "If a paper is already loaded and the task is to analyze or review it, do not ask the user for clarification before reading the available paper content. "
-                    "When reading paper text, prefer larger chunks so you can see method and experiment details in one pass; use around 20000-30000 characters unless you have a strong reason to read less."
+                    "When reading paper text, prefer larger chunks so you can see method and experiment details in one pass; use around 20000-30000 characters unless you have a strong reason to read less. "
+                    "For review, idea-generation, and opportunity-mapping tasks, work breadth-first across multiple papers instead of exhausting one paper before looking at the rest. "
+                    "After you understand a paper well enough, save a compact digest before moving on."
                 ),
             },
             {
@@ -316,12 +319,12 @@ class AnalysisEngine:
                         f'You are currently reading "{title or paper_id or "the current paper"}". '
                         "Call the next paper tool now. "
                         "Either continue the same paper with `read_loaded_paper_content(...)`, "
-                        "or take another concrete paper-analysis action if you truly have enough evidence."
+                        "or, if you already understand the paper well enough, save a compact digest with `save_paper_digest(...)` before moving on."
                     )
                 return (
                     "This is an internal tool loop, so do not narrate what you might do next. "
                     f'You have finished reading "{title or paper_id or "the current paper"}". '
-                    "Now either fetch/read another relevant paper, inspect the loaded papers to choose the next one, or reply exactly with READY if you already have enough context for synthesis."
+                    "Now save a compact digest with `save_paper_digest(...)`, then fetch/read another relevant paper, inspect the loaded papers to choose the next one, or reply exactly with READY if you already have enough cross-paper context for synthesis."
                 )
             if tool_name == "fetch_arxiv_full_text" and isinstance(payload, dict):
                 paper_id = payload.get("paper_id")
@@ -329,7 +332,7 @@ class AnalysisEngine:
                 return (
                     "This is an internal tool loop, so do not narrate what you might do next. "
                     f'You just fetched full text for "{title or paper_id or "a paper"}". '
-                    "Call the next paper tool now: either read this paper with `read_loaded_paper_content(...)`, fetch another important paper, or reply exactly with READY if you already have enough context."
+                    "Call the next paper tool now: either read this paper with `read_loaded_paper_content(...)`, fetch another important paper, or reply exactly with READY if you already have enough cross-paper context."
                 )
             break
         return (
@@ -369,7 +372,7 @@ class AnalysisEngine:
                 "Do not stop or wait for the user yet. "
                 f"Continue the same paper by calling `read_loaded_paper_content(paper_id={paper_id!r}, title={title!r}, offset={next_offset}, max_chars=24000)` "
                 "to read the next chunk, "
-                "or, if you already have enough evidence from the paper text, continue with another concrete paper-analysis tool action."
+                "or, if you already have enough evidence from the paper text, save a digest with `save_paper_digest(...)` before moving to another paper."
             )
         return None
 
@@ -406,7 +409,7 @@ class AnalysisEngine:
                     f'You just read only part of the loaded paper "{title or paper_id or "current paper"}" and there is more paper text remaining. '
                     "Do not wait for the user. "
                     f"Call `read_loaded_paper_content(paper_id={paper_id!r}, title={title!r}, offset={next_offset}, max_chars=24000)` to continue the same paper, "
-                    "or move directly to the next concrete analysis action if you already have enough evidence."
+                    "or save a digest with `save_paper_digest(...)` if you already have enough evidence."
                 )
             return None
         return None
@@ -668,6 +671,57 @@ class AnalysisEngine:
                 }
             )
             tool_impl["read_loaded_paper_content"] = read_loaded_paper_content
+
+            def save_paper_digest(
+                paper_id: str,
+                title: str,
+                summary: str,
+                method: str,
+                contributions: list[str],
+                open_questions: list[str],
+            ) -> str:
+                digest = PaperDigest(
+                    paper_id=paper_id,
+                    title=title,
+                    summary=summary,
+                    method=method,
+                    contributions=contributions,
+                    open_questions=open_questions,
+                )
+                replaced = False
+                for index, existing in enumerate(context.paper_digests):
+                    if existing.paper_id == paper_id:
+                        context.paper_digests[index] = digest
+                        replaced = True
+                        break
+                if not replaced:
+                    context.paper_digests.append(digest)
+                note = f'Saved paper digest for "{title}".'
+                context.discovery_notes.append(note)
+                return str(digest.model_dump(mode="json"))
+
+            tool_specs.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "save_paper_digest",
+                        "description": "Save a compact working-memory digest for a paper after reading it. Use this to preserve summary, method, contributions, and open questions before moving to other papers.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "paper_id": {"type": "string"},
+                                "title": {"type": "string"},
+                                "summary": {"type": "string"},
+                                "method": {"type": "string"},
+                                "contributions": {"type": "array", "items": {"type": "string"}},
+                                "open_questions": {"type": "array", "items": {"type": "string"}},
+                            },
+                            "required": ["paper_id", "title", "summary", "method", "contributions", "open_questions"],
+                        },
+                    },
+                }
+            )
+            tool_impl["save_paper_digest"] = save_paper_digest
 
         if "future_experiment_runner" in task_spec.allowed_tools and self.workspace is not None:
             def list_workspace_files(directory: str = ".", pattern: str = "*") -> str:
@@ -1034,12 +1088,16 @@ class AnalysisEngine:
 
     def _build_prompt(self, task_spec: TaskSpec, context: ResearchContext) -> str:
         papers = "\n\n".join(self._format_paper(doc) for doc in context.papers[:10])
+        paper_digests = "\n\n".join(self._format_paper_digest(digest) for digest in context.paper_digests[:10])
         professors = ", ".join(context.professors) if context.professors else "None"
         topic = context.topic or "Not specified"
         return task_spec.prompt_template.format(
             topic=topic,
             professors=professors,
-            papers=papers or "No paper contents available.",
+            papers=(
+                ("Saved paper digests:\n" + paper_digests + "\n\n" if paper_digests else "")
+                + (papers or "No paper contents available.")
+            ),
             output_sections=", ".join(task_spec.output_sections),
             constraints="\n".join(f"- {item}" for item in task_spec.constraints) or "- None",
             instructions=context.instructions or "No instructions provided.",
@@ -1054,6 +1112,16 @@ class AnalysisEngine:
             f"Source: {metadata.source}\n"
             f"Abstract: {metadata.abstract or 'N/A'}\n"
             f"Content:\n{doc.content[:12000]}"
+        )
+
+    @staticmethod
+    def _format_paper_digest(digest: PaperDigest) -> str:
+        return (
+            f"Paper: {digest.title}\n"
+            f"Summary: {digest.summary}\n"
+            f"Method: {digest.method}\n"
+            f"Contributions: {', '.join(digest.contributions)}\n"
+            f"Open questions: {', '.join(digest.open_questions)}"
         )
 
     @staticmethod

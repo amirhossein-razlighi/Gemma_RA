@@ -67,6 +67,15 @@ class ReviewPaperSummary(BaseModel):
     limitations: list[str]
 
 
+class PaperDigest(BaseModel):
+    paper_id: str
+    title: str
+    summary: str
+    method: str
+    contributions: list[str]
+    open_questions: list[str]
+
+
 class LiteratureReview(BaseModel):
     topic: str
     papers: list[PaperMetadata]
@@ -143,6 +152,7 @@ class ResearchContext(BaseModel):
     professors: list[str] = Field(default_factory=list)
     local_paper_paths: list[Path] = Field(default_factory=list)
     papers: list[PaperDocument] = Field(default_factory=list)
+    paper_digests: list[PaperDigest] = Field(default_factory=list)
     discovery_notes: list[str] = Field(default_factory=list)
     instructions: str | None = None
     instructions_path: Path | None = None

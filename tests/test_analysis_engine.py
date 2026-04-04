@@ -629,6 +629,74 @@ def test_completed_paper_read_reprompts_for_next_concrete_paper_action() -> None
     assert "reply exactly with READY" in followup_prompt
 
 
+def test_save_paper_digest_updates_context_and_prompt_memory() -> None:
+    class DigestClient:
+        def __init__(self) -> None:
+            self.final_prompt = ""
+
+        def chat(self, messages, tools=None) -> dict:
+            return {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "save_paper_digest",
+                                "arguments": {
+                                    "paper_id": "paper-1",
+                                    "title": "Graph neural nets",
+                                    "summary": "A message-passing baseline for graph prediction.",
+                                    "method": "Neighborhood aggregation with learned updates.",
+                                    "contributions": ["Strong baseline", "Simple architecture"],
+                                    "open_questions": ["How to handle long-range dependencies"],
+                                },
+                            }
+                        }
+                    ],
+                }
+            }
+
+        def generate_structured(self, prompt: str, schema: dict) -> dict:
+            self.final_prompt = prompt
+            return {
+                "topic": "graph learning",
+                "ideas": [
+                    {
+                        "title": "Solving long-range dependency drift in graph representation learning",
+                        "problem_targeted": "Message passing models weaken on long-range dependencies.",
+                        "motivation": "Shallow locality still dominates many graph pipelines.",
+                        "novelty_rationale": "Correction mechanisms for long-range structural drift are still underexplored.",
+                        "grounding": "The digest highlights message-passing strengths but also long-range open questions.",
+                        "expected_contribution": "A more stable graph encoder for long-range structure.",
+                        "related_papers": ["Graph neural nets"],
+                        "proposed_method": "Introduce a memory or correction module on top of message passing.",
+                        "risks": ["Higher compute cost"],
+                    }
+                ],
+            }
+
+    client = DigestClient()
+    engine = AnalysisEngine(client, max_iterations=1)
+    paper = PaperDocument(
+        metadata=PaperMetadata(
+            paper_id="paper-1",
+            title="Graph neural nets",
+            authors=["Jane Doe"],
+            source="local",
+        ),
+        content="Paper text.",
+        sections=[],
+    )
+    context = ResearchContext(task=TaskType.GENERATE_IDEAS, topic="graph learning", papers=[paper])
+
+    engine.run(TaskType.GENERATE_IDEAS, get_task_spec(TaskType.GENERATE_IDEAS), context)
+
+    assert context.paper_digests[0].paper_id == "paper-1"
+    assert "Saved paper digests:" in client.final_prompt
+    assert "Open questions: How to handle long-range dependencies" in client.final_prompt
+
+
 def test_non_instruction_tasks_report_internal_tool_loop_completion() -> None:
     reports: list[tuple[str, str]] = []
 

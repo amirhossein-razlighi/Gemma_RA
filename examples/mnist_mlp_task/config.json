@@ -1,0 +1,10 @@
+{
+  "learning_rate": 0.003,
+  "epochs": 70,
+  "hidden_size": 12,
+  "depth": 1,
+  "dropout": 0.2,
+  "weight_decay": 0.0,
+  "log_every": 3,
+  "target_accuracy": 0.88
+}

@@ -313,6 +313,13 @@ class AnalysisEngine:
                 paper_id = paper.get("paper_id")
                 title = paper.get("title")
                 remaining = payload.get("remaining_chars")
+                excerpt = payload.get("content", "")
+                excerpt_block = ""
+                if isinstance(excerpt, str) and excerpt.strip():
+                    excerpt_block = (
+                        "\nRecent paper excerpt from the immediately preceding tool result:\n"
+                        f"{excerpt[:1500]}\n"
+                    )
                 if isinstance(remaining, int) and remaining > 0:
                     return (
                         "This is an internal tool loop, so do not narrate what you might do next. "
@@ -324,7 +331,10 @@ class AnalysisEngine:
                 return (
                     "This is an internal tool loop, so do not narrate what you might do next. "
                     f'You have finished reading "{title or paper_id or "the current paper"}". '
-                    "Now save a compact digest with `save_paper_digest(...)`, then fetch/read another relevant paper, inspect the loaded papers to choose the next one, or reply exactly with READY if you already have enough cross-paper context for synthesis."
+                    f"{excerpt_block}"
+                    "Use the paper text from the immediately preceding tool result to save a compact digest right now with `save_paper_digest(...)`. "
+                    "Do not claim that you lack context when you have just read the paper. "
+                    "After saving the digest, fetch/read another relevant paper, inspect the loaded papers to choose the next one, or reply exactly with READY if you already have enough cross-paper context for synthesis."
                 )
             if tool_name == "fetch_arxiv_full_text" and isinstance(payload, dict):
                 paper_id = payload.get("paper_id")
@@ -337,7 +347,7 @@ class AnalysisEngine:
             break
         return (
             "This is an internal tool loop, so do not narrate what you might do next. "
-            "Call a concrete paper-related tool now, or reply exactly with READY if you already have enough context."
+            "Call a concrete paper-related tool now using the evidence already present in the recent tool results, or reply exactly with READY if you already have enough context."
         )
 
     @staticmethod
@@ -1087,7 +1097,10 @@ class AnalysisEngine:
         return "; ".join(collected)
 
     def _build_prompt(self, task_spec: TaskSpec, context: ResearchContext) -> str:
-        papers = "\n\n".join(self._format_paper(doc) for doc in context.papers[:10])
+        digested_ids = {digest.paper_id for digest in context.paper_digests}
+        raw_papers = [doc for doc in context.papers if doc.metadata.paper_id not in digested_ids][:10]
+        raw_char_limit = 3000 if context.paper_digests else 12000
+        papers = "\n\n".join(self._format_paper(doc, max_chars=raw_char_limit) for doc in raw_papers)
         paper_digests = "\n\n".join(self._format_paper_digest(digest) for digest in context.paper_digests[:10])
         professors = ", ".join(context.professors) if context.professors else "None"
         topic = context.topic or "Not specified"
@@ -1104,14 +1117,14 @@ class AnalysisEngine:
         )
 
     @staticmethod
-    def _format_paper(doc: PaperDocument) -> str:
+    def _format_paper(doc: PaperDocument, max_chars: int = 12000) -> str:
         metadata = doc.metadata
         return (
             f"Title: {metadata.title}\n"
             f"Authors: {', '.join(metadata.authors) or 'Unknown'}\n"
             f"Source: {metadata.source}\n"
             f"Abstract: {metadata.abstract or 'N/A'}\n"
-            f"Content:\n{doc.content[:12000]}"
+            f"Content:\n{doc.content[:max_chars]}"
         )
 
     @staticmethod

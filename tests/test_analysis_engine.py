@@ -625,6 +625,8 @@ def test_completed_paper_read_reprompts_for_next_concrete_paper_action() -> None
         if message.get("role") == "user" and "internal tool loop" in message.get("content", "")
     )
     assert 'finished reading "Graph neural nets"' in followup_prompt
+    assert "Use the paper text from the immediately preceding tool result" in followup_prompt
+    assert "Do not claim that you lack context" in followup_prompt
     assert "fetch/read another relevant paper" in followup_prompt
     assert "reply exactly with READY" in followup_prompt
 
@@ -695,6 +697,7 @@ def test_save_paper_digest_updates_context_and_prompt_memory() -> None:
     assert context.paper_digests[0].paper_id == "paper-1"
     assert "Saved paper digests:" in client.final_prompt
     assert "Open questions: How to handle long-range dependencies" in client.final_prompt
+    assert "Content:\nPaper text." not in client.final_prompt
 
 
 def test_non_instruction_tasks_report_internal_tool_loop_completion() -> None:

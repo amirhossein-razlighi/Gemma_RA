@@ -125,7 +125,7 @@ uv run gemma-ra analyze-paper --paper ./papers/example.pdf
 Review a topic from local papers:
 
 ```bash
-uv run gemma-ra review-topic --topic "graph representation learning" --papers-dir ./papers
+uv run gemma-ra review-topic --topic "diffusion models" --papers-dir ./papers
 ```
 
 Search papers by professor name:
@@ -139,15 +139,15 @@ Use multiple professors:
 ```bash
 uv run gemma-ra generate-ideas \
   --topic "computer vision" \
-  --professor "Daniel CohenOr, Jitendra Malik"
+  --professor "Daniel CohenOr, Richard Zhang"
 ```
 
 Map a field end-to-end:
 
 ```bash
 uv run gemma-ra map-research-opportunities \
-  --topic "graph representation learning" \
-  --professor "Jure Leskovec"
+  --topic "3d computer vision" \
+  --professor "Luc Van Gool, Andreas Tagliasacchi"
 ```
 
 Run your own instruction file:

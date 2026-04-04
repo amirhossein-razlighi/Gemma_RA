@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from gemma_ra.analysis.engine import AnalysisEngine
@@ -458,3 +459,168 @@ def test_non_instruction_tasks_report_internal_tool_loop_completion() -> None:
     engine.run(TaskType.FIND_PAPERS, get_task_spec(TaskType.FIND_PAPERS), context)
 
     assert ("agent", "tool loop complete; proceeding to structured synthesis") in reports
+
+
+def test_tool_loop_accepts_interactive_guidance_between_iterations() -> None:
+    reports: list[tuple[str, str]] = []
+    pending_guidance = ["Stop hyperparameter tuning and change the architecture in train.py."]
+
+    class GuidanceClient:
+        def __init__(self) -> None:
+            self.chat_calls = 0
+
+        def chat(self, messages, tools=None) -> dict:
+            self.chat_calls += 1
+            if self.chat_calls == 1:
+                tool_call = {
+                    "function": {
+                        "name": "list_workspace_files",
+                        "arguments": {"directory": ".", "pattern": "*"},
+                    }
+                }
+                return {"message": {"role": "assistant", "content": "", "tool_calls": [tool_call]}}
+            assert any("change the architecture" in message.get("content", "") for message in messages)
+            return {"message": {"role": "assistant", "content": "FINISHED", "tool_calls": []}}
+
+        def generate_structured(self, prompt: str, schema: dict) -> dict:
+            return {
+                "request": "Tune the project until success.",
+                "summary": "Processed guidance from the terminal.",
+                "actions_taken": [],
+                "key_findings": [],
+                "hot_topics": [],
+                "research_opportunities": [],
+                "experiment_suggestions": [],
+                "next_steps": [],
+            }
+
+    class WorkspaceStub:
+        @staticmethod
+        def list_files(directory: str = ".", pattern: str = "*") -> list[str]:
+            return ["train.py", "config.json"]
+
+    def reporter(kind: str, text: str, end: str = "\n") -> None:
+        reports.append((kind, text))
+
+    def interactive_guidance() -> list[str]:
+        nonlocal pending_guidance
+        guidance, pending_guidance = pending_guidance, []
+        return guidance
+
+    engine = AnalysisEngine(
+        GuidanceClient(),
+        workspace=WorkspaceStub(),
+        max_iterations=2,
+        reporter=reporter,
+        interactive_guidance=interactive_guidance,
+    )
+    context = ResearchContext(task=TaskType.RUN_INSTRUCTIONS, instructions="Tune the project until success.")
+
+    engine.run(TaskType.RUN_INSTRUCTIONS, get_task_spec(TaskType.RUN_INSTRUCTIONS), context)
+
+    assert any("received user guidance" in text for kind, text in reports if kind == "agent")
+
+
+def test_run_instructions_reprompt_restates_success_criteria() -> None:
+    class CriteriaClient:
+        def __init__(self) -> None:
+            self.chat_calls = 0
+            self.second_messages = []
+
+        def chat(self, messages, tools=None) -> dict:
+            self.chat_calls += 1
+            if self.chat_calls == 1:
+                return {"message": {"role": "assistant", "content": "I should inspect the logs next.", "tool_calls": []}}
+            self.second_messages = messages
+            return {"message": {"role": "assistant", "content": "FINISHED", "tool_calls": []}}
+
+        def generate_structured(self, prompt: str, schema: dict) -> dict:
+            return {
+                "request": "Tune until success.",
+                "summary": "Recovered after explicit criteria restatement.",
+                "actions_taken": [],
+                "key_findings": [],
+                "hot_topics": [],
+                "research_opportunities": [],
+                "experiment_suggestions": [],
+                "next_steps": [],
+            }
+
+    client = CriteriaClient()
+    engine = AnalysisEngine(client, max_iterations=2)
+    context = ResearchContext(
+        task=TaskType.RUN_INSTRUCTIONS,
+        instructions=(
+            "Success criteria:\n"
+            "- logs/latest.json must show success true\n"
+            "- final_loss must be less than or equal to 0.005\n"
+        ),
+    )
+
+    engine.run(TaskType.RUN_INSTRUCTIONS, get_task_spec(TaskType.RUN_INSTRUCTIONS), context)
+
+    assert client.chat_calls == 2
+    recovery_prompt = next(
+        message["content"]
+        for message in reversed(client.second_messages)
+        if message.get("role") == "user" and "Active success criteria:" in message.get("content", "")
+    )
+    assert "logs/latest.json must show success true" in recovery_prompt
+    assert "final_loss must be less than or equal to 0.005" in recovery_prompt
+
+
+def test_instruction_state_update_summarizes_log_json() -> None:
+    result = AnalysisEngine._instruction_state_update(
+        tool_name="read_workspace_file",
+        arguments={"path": "logs/latest.json"},
+        result=json.dumps(
+            {
+                "success": False,
+                "validation_accuracy": 0.7166,
+                "target_accuracy": 0.88,
+            }
+        ),
+    )
+
+    assert "Read logs/latest.json." in result
+    assert "success=False" in result
+    assert "validation_accuracy=0.7166" in result
+    assert "target_accuracy=0.88" in result
+
+
+def test_anti_loop_instruction_blocks_repeated_log_reads() -> None:
+    prompt = AnalysisEngine._anti_loop_instruction(
+        tool_name="read_workspace_file",
+        arguments={"path": "logs/latest.json"},
+        repeat_count=2,
+    )
+
+    assert "Do not read the same log file again" in prompt
+    assert "update_json_field" in prompt
+    assert "run_uv_python" in prompt
+
+
+def test_next_action_instruction_prefers_config_edits_after_failed_metrics() -> None:
+    prompt = AnalysisEngine._next_action_instruction(
+        tool_name="read_workspace_file",
+        arguments={"path": "logs/latest.json"},
+        result=json.dumps(
+            {
+                "success": False,
+                "learning_rate": 0.003,
+                "epochs": 100,
+                "hidden_size": 24,
+                "depth": 1,
+                "dropout": 0.2,
+                "weight_decay": 0.0,
+                "validation_accuracy": 0.7166,
+                "target_accuracy": 0.88,
+            }
+        ),
+    )
+
+    assert "Do not write a prose analysis" in prompt
+    assert "Prefer `config.json` before `train.py`" in prompt
+    assert "adjust `learning_rate`" in prompt
+    assert "increase `epochs`" in prompt
+    assert "run_uv_python" in prompt

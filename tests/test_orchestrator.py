@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from gemma_ra.agent.orchestrator import ResearchAgent, RunRequest
+from gemma_ra.core.exceptions import SourceError
 from gemma_ra.core.config import AppConfig
 from gemma_ra.core.schemas import PaperDocument, PaperMetadata, TaskType
 
@@ -47,6 +48,44 @@ class FakeAnalysisEngine:
         )()
 
 
+class PrefetchingArxivSource:
+    def __init__(self) -> None:
+        self.fetch_calls: list[str] = []
+
+    def search_and_load(self, professors: list[str], topic: str | None) -> tuple[list[PaperDocument], list[str]]:
+        return (
+            [
+                PaperDocument(
+                    metadata=PaperMetadata(
+                        paper_id="arxiv-1",
+                        title="Remote Paper",
+                        authors=["Jane Doe"],
+                        pdf_url="https://arxiv.org/pdf/arxiv-1",
+                        source="arxiv",
+                    ),
+                    content="Abstract only.",
+                    sections=[],
+                )
+            ],
+            ['arXiv search "author-only" returned 1 result(s).'],
+        )
+
+    def fetch_pdf_document(self, metadata: PaperMetadata, download_dir: Path) -> PaperDocument:
+        self.fetch_calls.append(metadata.paper_id)
+        return PaperDocument(
+            metadata=PaperMetadata(
+                paper_id=metadata.paper_id,
+                title=metadata.title,
+                authors=metadata.authors,
+                pdf_url=metadata.pdf_url,
+                local_path=download_dir / f"{metadata.paper_id}.pdf",
+                source="arxiv_pdf",
+            ),
+            content="Full remote paper text.",
+            sections=[],
+        )
+
+
 def test_orchestrator_writes_artifact(tmp_path: Path) -> None:
     config = AppConfig(output_dir=tmp_path)
     agent = ResearchAgent(config)
@@ -67,3 +106,34 @@ def test_orchestrator_writes_artifact(tmp_path: Path) -> None:
 
     assert artifact.markdown_path.exists()
     assert artifact.json_path.exists()
+
+
+def test_orchestrator_prefetches_arxiv_full_text_when_local_papers_missing(tmp_path: Path) -> None:
+    config = AppConfig(output_dir=tmp_path)
+    agent = ResearchAgent(config)
+
+    class MissingLocalSource:
+        def discover(self, papers_dir: Path) -> list[Path]:
+            raise SourceError(f"Papers directory does not exist: {papers_dir}")
+
+        def read_many(self, paths: list[Path]) -> list[PaperDocument]:
+            return []
+
+    arxiv_source = PrefetchingArxivSource()
+    agent.local_source = MissingLocalSource()
+    agent.arxiv_source = arxiv_source
+
+    context = agent._build_context(
+        RunRequest(
+            task=TaskType.REVIEW_TOPIC,
+            topic="graphics",
+            professors=["Ali Mahdavi Amiri"],
+            papers_dir=tmp_path / "missing",
+            paper_paths=[],
+            output_dir=tmp_path,
+        )
+    )
+
+    assert arxiv_source.fetch_calls == ["arxiv-1"]
+    assert context.papers[0].metadata.source == "arxiv_pdf"
+    assert any("Fetched full PDF text" in note for note in context.discovery_notes)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pydantic import BaseModel
@@ -36,6 +37,7 @@ class AnalysisEngine:
         max_iterations: int = 3,
         reporter=None,
         stream_chat: bool = False,
+        interactive_guidance=None,
     ) -> None:
         self.model_client = model_client
         self.arxiv_search = arxiv_search
@@ -44,6 +46,7 @@ class AnalysisEngine:
         self.max_iterations = max_iterations
         self.reporter = reporter
         self.stream_chat = stream_chat
+        self.interactive_guidance = interactive_guidance
 
     def run(self, task: TaskType, task_spec: TaskSpec, context: ResearchContext) -> TaskResult:
         context = self._run_tool_loop(task=task, task_spec=task_spec, context=context)
@@ -103,6 +106,10 @@ class AnalysisEngine:
         tool_specs, tool_impl = self._build_runtime_tools(task_spec=task_spec, context=context)
         if not tool_specs:
             return context
+        success_criteria = self._success_criteria_summary(context.instructions)
+        latest_instruction_state = ""
+        last_tool_signature: tuple[str, str] | None = None
+        repeated_tool_calls = 0
 
         messages = [
             {
@@ -125,12 +132,17 @@ class AnalysisEngine:
                     f"Professors: {', '.join(context.professors) or 'None'}\n"
                     f"Preloaded papers: {len(context.papers)}\n"
                     f"Local paper paths: {', '.join(str(path) for path in context.local_paper_paths) or 'None'}\n"
-                    f"Instructions: {context.instructions or 'None'}"
+                    f"Instructions: {context.instructions or 'None'}\n"
+                    f"Active success criteria: {success_criteria}"
                 ),
             },
         ]
 
         for iteration_index in range(self.max_iterations):
+            guidance_messages = self._drain_interactive_guidance()
+            for guidance in guidance_messages:
+                messages.append({"role": "user", "content": guidance})
+                self._report("agent", f"received user guidance: {guidance}")
             self._report("agent", self._iteration_status(task, context, iteration_index + 1))
             try:
                 response = self.model_client.chat(
@@ -152,8 +164,11 @@ class AnalysisEngine:
                             "role": "user",
                             "content": (
                                 "You have not finished yet. "
-                                "If success criteria are not met, call the next tool now. "
-                                "Do not just describe the action. "
+                                f"Active success criteria: {success_criteria}. "
+                                f"Latest observed state: {latest_instruction_state or 'No concrete state update yet.'} "
+                                "If those success criteria are not met, call the next tool now. "
+                                "Do not just describe the action or analyze the logs in prose. "
+                                "Choose a concrete next action such as reading a file, editing code, changing JSON config, checking Python syntax, or rerunning the program. "
                                 "Use existing workspace-relative paths only, such as '.' , 'config.json', 'train.py', or 'logs/latest.json'. "
                                 "If a previous tool failed because of a bad path, correct the path before trying again. "
                                 "If and only if the success criteria are already met, reply exactly with FINISHED."
@@ -185,6 +200,48 @@ class AnalysisEngine:
                         "content": result,
                     }
                 )
+                tool_signature = (name, json.dumps(arguments, sort_keys=True, default=str))
+                if tool_signature == last_tool_signature:
+                    repeated_tool_calls += 1
+                else:
+                    repeated_tool_calls = 1
+                    last_tool_signature = tool_signature
+                if task == TaskType.RUN_INSTRUCTIONS:
+                    latest_instruction_state = self._instruction_state_update(
+                        tool_name=name,
+                        arguments=arguments,
+                        result=result,
+                    )
+                    if latest_instruction_state:
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"Latest observed state: {latest_instruction_state} "
+                                    "If success criteria are still not met, continue with a concrete tool call instead of a prose summary."
+                                ),
+                            }
+                        )
+                    next_action_prompt = self._next_action_instruction(
+                        tool_name=name,
+                        arguments=arguments,
+                        result=result,
+                    )
+                    if next_action_prompt:
+                        messages.append({"role": "user", "content": next_action_prompt})
+                    anti_loop_prompt = self._anti_loop_instruction(
+                        tool_name=name,
+                        arguments=arguments,
+                        repeat_count=repeated_tool_calls,
+                    )
+                    if anti_loop_prompt:
+                        messages.append({"role": "user", "content": anti_loop_prompt})
+                guidance_messages = self._drain_interactive_guidance()
+                if guidance_messages:
+                    for guidance in guidance_messages:
+                        messages.append({"role": "user", "content": guidance})
+                        self._report("agent", f"received user guidance: {guidance}")
+                    break
         return context
 
     def _iteration_status(self, task: TaskType, context: ResearchContext, iteration: int) -> str:
@@ -463,9 +520,52 @@ class AnalysisEngine:
                 context.discovery_notes.append(note)
                 return note
 
+            def append_workspace_file(path: str, content: str) -> str:
+                result = self.workspace.append_file(path=path, content=content)
+                note = f'Appended to file "{result["path"]}".'
+                context.discovery_notes.append(note)
+                return str(result)
+
+            def replace_in_workspace_file(path: str, old_text: str, new_text: str, count: int = 1) -> str:
+                result = self.workspace.replace_in_file(
+                    path=path,
+                    old_text=old_text,
+                    new_text=new_text,
+                    count=count,
+                )
+                note = f'Replaced text in "{result["path"]}".'
+                context.discovery_notes.append(note)
+                return str(result)
+
             def update_json_field(path: str, field: str, value: Any) -> str:
                 result = self.workspace.update_json_field(path=path, field=field, value=value)
                 note = f'Updated JSON field "{field}" in "{result["path"]}" to {value!r}.'
+                context.discovery_notes.append(note)
+                return str(result)
+
+            def python_syntax_check(path: str) -> str:
+                result = self.workspace.python_syntax_check(path=path)
+                note = (
+                    f'Python syntax check passed for "{result["path"]}".'
+                    if result["ok"]
+                    else f'Python syntax check failed for "{result["path"]}".'
+                )
+                context.discovery_notes.append(note)
+                return str(result)
+
+            def upsert_python_function(
+                path: str,
+                function_name: str,
+                function_source: str,
+                class_name: str | None = None,
+            ) -> str:
+                result = self.workspace.upsert_python_function(
+                    path=path,
+                    function_name=function_name,
+                    function_source=function_source,
+                    class_name=class_name,
+                )
+                note = f'{result["action"].title()} Python function "{function_name}" in "{result["path"]}".'
                 context.discovery_notes.append(note)
                 return str(result)
 
@@ -533,6 +633,38 @@ class AnalysisEngine:
                         },
                     },
                     {
+                    "type": "function",
+                    "function": {
+                        "name": "append_workspace_file",
+                        "description": "Append text to an existing file inside the allowed workspace. Good for adding helper code, notes, or small blocks.",
+                        "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {"type": "string"},
+                                    "content": {"type": "string"},
+                                },
+                                "required": ["path", "content"],
+                            },
+                        },
+                    },
+                    {
+                    "type": "function",
+                    "function": {
+                        "name": "replace_in_workspace_file",
+                        "description": "Replace an exact text snippet in a file inside the allowed workspace. Prefer this over full-file rewrites when editing code.",
+                        "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {"type": "string"},
+                                    "old_text": {"type": "string"},
+                                    "new_text": {"type": "string"},
+                                    "count": {"type": "integer"},
+                                },
+                                "required": ["path", "old_text", "new_text"],
+                            },
+                        },
+                    },
+                    {
                         "type": "function",
                         "function": {
                             "name": "update_json_field",
@@ -545,6 +677,37 @@ class AnalysisEngine:
                                     "value": {},
                                 },
                                 "required": ["path", "field", "value"],
+                            },
+                        },
+                    },
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "python_syntax_check",
+                            "description": "Run a Python syntax check on a file inside the allowed workspace using py_compile.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {"type": "string"},
+                                },
+                                "required": ["path"],
+                            },
+                        },
+                    },
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "upsert_python_function",
+                            "description": "Create or replace a Python function in a .py file. Can target a top-level function or a method inside an existing class.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {"type": "string"},
+                                    "function_name": {"type": "string"},
+                                    "function_source": {"type": "string"},
+                                    "class_name": {"type": "string"},
+                                },
+                                "required": ["path", "function_name", "function_source"],
                             },
                         },
                     },
@@ -570,7 +733,11 @@ class AnalysisEngine:
             tool_impl["list_workspace_files"] = list_workspace_files
             tool_impl["read_workspace_file"] = read_workspace_file
             tool_impl["write_workspace_file"] = write_workspace_file
+            tool_impl["append_workspace_file"] = append_workspace_file
+            tool_impl["replace_in_workspace_file"] = replace_in_workspace_file
             tool_impl["update_json_field"] = update_json_field
+            tool_impl["python_syntax_check"] = python_syntax_check
+            tool_impl["upsert_python_function"] = upsert_python_function
             tool_impl["run_uv_python"] = run_uv_python
 
         return tool_specs, tool_impl
@@ -585,6 +752,122 @@ class AnalysisEngine:
         if self.reporter is None:
             return
         self.reporter(kind, message, end=end)
+
+    def _drain_interactive_guidance(self) -> list[str]:
+        if self.interactive_guidance is None:
+            return []
+        messages = self.interactive_guidance()
+        return [message.strip() for message in messages if message and message.strip()]
+
+    @staticmethod
+    def _anti_loop_instruction(tool_name: str, arguments: dict[str, Any], repeat_count: int) -> str:
+        if repeat_count < 2:
+            return ""
+        path = str(arguments.get("path", ""))
+        if tool_name == "read_workspace_file" and path == "logs/latest.json":
+            return (
+                "You have already read logs/latest.json and know the current metrics. "
+                "Do not read the same log file again until you change a file or rerun training. "
+                "Your next action must be one of: update_json_field, replace_in_workspace_file, "
+                "upsert_python_function, python_syntax_check, or run_uv_python."
+            )
+        return ""
+
+    @staticmethod
+    def _instruction_state_update(tool_name: str, arguments: dict[str, Any], result: Any) -> str:
+        if tool_name != "read_workspace_file":
+            return ""
+        path = str(arguments.get("path", ""))
+        if not path.endswith(".json"):
+            return ""
+        try:
+            payload = json.loads(result)
+        except (TypeError, json.JSONDecodeError):
+            return ""
+        if not isinstance(payload, dict):
+            return ""
+
+        state_parts: list[str] = [f"Read {path}."]
+        if "success" in payload:
+            state_parts.append(f"success={payload['success']}.")
+        if "final_loss" in payload and "target_loss" in payload:
+            state_parts.append(
+                f"final_loss={payload['final_loss']} and target_loss={payload['target_loss']}."
+            )
+        if "validation_accuracy" in payload and "target_accuracy" in payload:
+            state_parts.append(
+                f"validation_accuracy={payload['validation_accuracy']} and target_accuracy={payload['target_accuracy']}."
+            )
+        return " ".join(state_parts)
+
+    @staticmethod
+    def _next_action_instruction(tool_name: str, arguments: dict[str, Any], result: Any) -> str:
+        if tool_name != "read_workspace_file":
+            return ""
+        path = str(arguments.get("path", ""))
+        if path != "logs/latest.json":
+            return ""
+        try:
+            payload = json.loads(result)
+        except (TypeError, json.JSONDecodeError):
+            return ""
+        if not isinstance(payload, dict):
+            return ""
+        if payload.get("success") is True:
+            return ""
+
+        suggestions: list[str] = []
+        if "learning_rate" in payload:
+            suggestions.append("adjust `learning_rate` in `config.json` with `update_json_field`")
+        if "epochs" in payload:
+            suggestions.append("increase `epochs` in `config.json` with `update_json_field`")
+        for field in ("hidden_size", "depth", "dropout", "weight_decay"):
+            if field in payload:
+                suggestions.append(f"change `{field}` in `config.json` with `update_json_field`")
+
+        suggestions_text = "; ".join(suggestions[:5]) or (
+            "edit `config.json` or `train.py`, then rerun training"
+        )
+        return (
+            "The latest metrics do not meet success criteria. "
+            "Do not write a prose analysis. "
+            "Your next step should be a concrete change followed by a rerun. "
+            f"Prefer `config.json` before `train.py`. Likely next actions: {suggestions_text}. "
+            "After making one concrete change, use `run_uv_python` on `train.py`."
+        )
+
+    @staticmethod
+    def _success_criteria_summary(instructions: str | None) -> str:
+        if not instructions:
+            return "No explicit success criteria were provided."
+
+        lines = [line.rstrip() for line in instructions.splitlines()]
+        start_index = None
+        for index, line in enumerate(lines):
+            if line.strip().lower().startswith("success criteria"):
+                start_index = index + 1
+                break
+        if start_index is None:
+            return "No explicit success criteria were provided."
+
+        collected: list[str] = []
+        for line in lines[start_index:]:
+            stripped = line.strip()
+            if not stripped:
+                if collected:
+                    break
+                continue
+            if stripped.startswith(("-", "*")):
+                collected.append(stripped[1:].strip())
+                continue
+            lowered = stripped.lower()
+            if lowered.startswith("rules:") or lowered.startswith("available behaviors"):
+                break
+            if collected:
+                break
+        if not collected:
+            return "No explicit success criteria were provided."
+        return "; ".join(collected)
 
     def _build_prompt(self, task_spec: TaskSpec, context: ResearchContext) -> str:
         papers = "\n\n".join(self._format_paper(doc) for doc in context.papers[:10])

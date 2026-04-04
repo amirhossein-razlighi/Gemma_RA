@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import queue
+import sys
+import threading
 from pathlib import Path
 from typing import Annotated
 
@@ -15,6 +18,46 @@ app = typer.Typer(help="Gemma-powered research assistant for local and arXiv pap
 console = Console()
 
 
+class InteractiveGuidanceBridge:
+    def __init__(self) -> None:
+        self._queue: queue.Queue[str] = queue.Queue()
+        self._thread: threading.Thread | None = None
+        self._show_prompt = False
+
+    def start(self) -> bool:
+        if not sys.stdin.isatty():
+            return False
+        self._show_prompt = True
+        self._thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._thread.start()
+        return True
+
+    def _reader_loop(self) -> None:
+        while True:
+            try:
+                line = input("guidance> ")
+            except Exception:  # noqa: BLE001
+                return
+            self._queue.put(line.rstrip("\n"))
+
+    def drain(self) -> list[str]:
+        messages: list[str] = []
+        while True:
+            try:
+                messages.append(self._queue.get_nowait())
+            except queue.Empty:
+                break
+        return messages
+
+
+def _normalize_professors(professors: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for value in professors:
+        parts = [part.strip() for part in value.split(",")]
+        normalized.extend(part for part in parts if part)
+    return normalized
+
+
 def _run_task(
     task: TaskType,
     topic: str | None,
@@ -28,7 +71,9 @@ def _run_task(
     verbose: bool = False,
 ) -> None:
     config = load_config(config_path)
+    professors = _normalize_professors(professors)
     active_stream_kind: str | None = None
+    guidance_bridge = InteractiveGuidanceBridge() if verbose else None
 
     def reporter(kind: str, message: str, end: str = "\n") -> None:
         nonlocal active_stream_kind
@@ -59,7 +104,17 @@ def _run_task(
 
         console.print(f"{prefix} {message}", end=end, markup=True, soft_wrap=True)
 
-    agent = ResearchAgent(config, reporter=reporter if verbose else None, stream_chat=verbose)
+    guidance_enabled = guidance_bridge.start() if guidance_bridge is not None else False
+    if guidance_enabled:
+        console.print("[dim]Interactive guidance is available below while the agent runs.[/dim]")
+        console.print("[dim]" + ("-" * min(console.size.width, 80)) + "[/dim]")
+
+    agent = ResearchAgent(
+        config,
+        reporter=reporter if verbose else None,
+        stream_chat=verbose,
+        interactive_guidance=guidance_bridge.drain if guidance_bridge is not None else None,
+    )
     try:
         artifact = agent.run(
             RunRequest(
@@ -113,7 +168,7 @@ CommonInstructions = Annotated[
 ]
 CommonVerbose = Annotated[
     bool,
-    typer.Option("--verbose", help="Stream agent progress, tool calls, and model output to stdout."),
+    typer.Option("--verbose/--quiet", help="Stream agent progress, tool calls, and model output to stdout."),
 ]
 
 
@@ -122,7 +177,7 @@ def analyze_paper(
     paper: CommonPaper,
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
-    verbose: CommonVerbose = False,
+    verbose: CommonVerbose = True,
 ) -> None:
     """Analyze one local paper into a structured summary."""
     _run_task(
@@ -145,7 +200,7 @@ def review_topic(
     paper: CommonPaper = [],
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
-    verbose: CommonVerbose = False,
+    verbose: CommonVerbose = True,
 ) -> None:
     """Synthesize a literature review from local papers or arXiv search."""
     _run_task(TaskType.REVIEW_TOPIC, topic, professor, papers_dir, paper, config, output_dir, verbose=verbose)
@@ -157,7 +212,7 @@ def find_papers(
     professor: CommonProfessors = [],
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
-    verbose: CommonVerbose = False,
+    verbose: CommonVerbose = True,
 ) -> None:
     """Find recent relevant papers from arXiv by professor name."""
     _run_task(TaskType.FIND_PAPERS, topic, professor, None, [], config, output_dir, verbose=verbose)
@@ -171,7 +226,7 @@ def generate_ideas(
     paper: CommonPaper = [],
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
-    verbose: CommonVerbose = False,
+    verbose: CommonVerbose = True,
 ) -> None:
     """Generate grounded research ideas from local papers or arXiv search."""
     _run_task(TaskType.GENERATE_IDEAS, topic, professor, papers_dir, paper, config, output_dir, verbose=verbose)
@@ -185,7 +240,7 @@ def suggest_experiments(
     paper: CommonPaper = [],
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
-    verbose: CommonVerbose = False,
+    verbose: CommonVerbose = True,
 ) -> None:
     """Suggest lightweight experiments to validate a research idea."""
     _run_task(TaskType.SUGGEST_EXPERIMENTS, topic, professor, papers_dir, paper, config, output_dir, verbose=verbose)
@@ -199,7 +254,7 @@ def map_research_opportunities(
     paper: CommonPaper = [],
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
-    verbose: CommonVerbose = False,
+    verbose: CommonVerbose = True,
 ) -> None:
     """Map a field from professors and papers, then propose novel directions and experiments."""
     _run_task(
@@ -223,7 +278,7 @@ def run_instructions(
     paper: CommonPaper = [],
     config: CommonConfig = None,
     output_dir: CommonOutput = None,
-    verbose: CommonVerbose = False,
+    verbose: CommonVerbose = True,
 ) -> None:
     """Read INSTRUCTIONS.md, let the model choose tools, and write a structured result."""
     if not instructions_file.exists():

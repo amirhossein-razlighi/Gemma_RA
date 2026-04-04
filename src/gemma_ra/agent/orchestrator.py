@@ -30,7 +30,7 @@ class RunRequest:
 
 
 class ResearchAgent:
-    def __init__(self, config: AppConfig, reporter=None, stream_chat: bool = False) -> None:
+    def __init__(self, config: AppConfig, reporter=None, stream_chat: bool = False, interactive_guidance=None) -> None:
         self.config = config
         self.tool_registry = ToolRegistry.default()
         self.local_source = LocalPaperSource()
@@ -44,6 +44,7 @@ class ResearchAgent:
             max_iterations=config.executor.max_iterations,
             reporter=reporter,
             stream_chat=stream_chat,
+            interactive_guidance=interactive_guidance,
         )
 
     def run(self, request: RunRequest) -> ArtifactRecord:
@@ -69,20 +70,40 @@ class ResearchAgent:
     def _build_context(self, request: RunRequest) -> ResearchContext:
         papers = []
         local_paths = list(request.paper_paths)
+        notes: list[str] = []
         if request.papers_dir:
-            local_paths.extend(self.local_source.discover(request.papers_dir))
+            try:
+                local_paths.extend(self.local_source.discover(request.papers_dir))
+            except SourceError as exc:
+                if request.professors:
+                    notes.append(str(exc))
+                else:
+                    raise
 
         if local_paths:
             papers.extend(self.local_source.read_many(local_paths))
 
+        local_papers_found = bool(papers)
         if request.professors:
-            arxiv_papers, notes = self.arxiv_source.search_and_load(
+            arxiv_papers, arxiv_notes = self.arxiv_source.search_and_load(
                 professors=request.professors,
                 topic=request.topic,
             )
+            notes.extend(arxiv_notes)
+            if self._should_prefetch_arxiv_full_text(request=request, local_papers_found=local_papers_found):
+                fetched_papers: list = []
+                download_dir = self.workspace.resolve_path(".") / "arxiv_papers"
+                for paper in arxiv_papers[: min(3, self.config.arxiv.max_results)]:
+                    try:
+                        fetched = self.arxiv_source.fetch_pdf_document(paper.metadata, download_dir)
+                    except SourceError as exc:
+                        notes.append(f'Failed to fetch full text for "{paper.metadata.title}": {exc}')
+                        fetched_papers.append(paper)
+                    else:
+                        notes.append(f'Fetched full PDF text for "{fetched.metadata.title}" during context build.')
+                        fetched_papers.append(fetched)
+                arxiv_papers = fetched_papers
             papers.extend(arxiv_papers)
-        else:
-            notes = []
 
         if request.task not in {TaskType.FIND_PAPERS, TaskType.RUN_INSTRUCTIONS} and not papers:
             raise SourceError("No papers were found. Provide local PDFs or professor names.")
@@ -96,6 +117,21 @@ class ResearchAgent:
             discovery_notes=notes,
             instructions=request.instructions,
             instructions_path=request.instructions_path,
+        )
+
+    @staticmethod
+    def _should_prefetch_arxiv_full_text(request: RunRequest, local_papers_found: bool) -> bool:
+        return (
+            not local_papers_found
+            and bool(request.professors)
+            and request.task
+            in {
+                TaskType.ANALYZE_PAPER,
+                TaskType.REVIEW_TOPIC,
+                TaskType.GENERATE_IDEAS,
+                TaskType.SUGGEST_EXPERIMENTS,
+                TaskType.MAP_RESEARCH_OPPORTUNITIES,
+            }
         )
 
     def shutdown(self) -> None:

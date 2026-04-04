@@ -61,6 +61,7 @@ See the final run artifact in [examples/regression_task/logs/latest.json](exampl
 - `src/gemma_ra/analysis`: tool loop, prompting, structured outputs, rendering
 - `src/gemma_ra/core`: config, schemas, artifacts, model client, workspace executor, task specs
 - `examples/regression_task`: runnable demo for autonomous hyperparameter tuning
+- `examples/mnist_mlp_task`: harder torch MLP demo on synthetic MNIST-style digits
 - `tests`: unit and integration-style tests
 
 ## Requirements
@@ -116,6 +117,15 @@ What happens:
 4. It reads [examples/regression_task/logs/latest.json](examples/regression_task/logs/latest.json)
 5. It edits [examples/regression_task/config.json](examples/regression_task/config.json)
 6. It reruns until the target loss is achieved
+
+Want a harder example with `torch` and a real neural network training loop?
+
+```bash
+uv pip install torch
+uv run gemma-ra run-instructions \
+  --instructions-file examples/mnist_mlp_task/INSTRUCTIONS.md \
+  --config examples/mnist_mlp_task/gemma_ra.example.yaml
+```
 
 ## CLI Examples
 

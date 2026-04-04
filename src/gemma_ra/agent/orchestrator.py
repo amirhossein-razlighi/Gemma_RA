@@ -83,14 +83,13 @@ class ResearchAgent:
         if local_paths:
             papers.extend(self.local_source.read_many(local_paths))
 
-        local_papers_found = bool(papers)
         if request.professors:
             arxiv_papers, arxiv_notes = self.arxiv_source.search_and_load(
                 professors=request.professors,
                 topic=request.topic,
             )
             notes.extend(arxiv_notes)
-            if self._should_prefetch_arxiv_full_text(request=request, local_papers_found=local_papers_found):
+            if self._should_prefetch_arxiv_full_text(request=request, arxiv_papers=arxiv_papers):
                 fetched_papers: list = []
                 download_dir = self.workspace.resolve_path(".") / "arxiv_papers"
                 for paper in arxiv_papers[: min(3, self.config.arxiv.max_results)]:
@@ -105,7 +104,7 @@ class ResearchAgent:
                 arxiv_papers = fetched_papers
             papers.extend(arxiv_papers)
 
-        if request.task not in {TaskType.FIND_PAPERS, TaskType.RUN_INSTRUCTIONS} and not papers:
+        if request.task not in {TaskType.FIND_PAPERS, TaskType.MAP_RESEARCH_OPPORTUNITIES, TaskType.RUN_INSTRUCTIONS} and not papers:
             raise SourceError("No papers were found. Provide local PDFs or professor names.")
 
         return ResearchContext(
@@ -120,14 +119,14 @@ class ResearchAgent:
         )
 
     @staticmethod
-    def _should_prefetch_arxiv_full_text(request: RunRequest, local_papers_found: bool) -> bool:
+    def _should_prefetch_arxiv_full_text(request: RunRequest, arxiv_papers: list) -> bool:
         return (
-            not local_papers_found
-            and bool(request.professors)
+            bool(request.professors)
+            and bool(arxiv_papers)
             and request.task
             in {
-                TaskType.ANALYZE_PAPER,
                 TaskType.REVIEW_TOPIC,
+                TaskType.FIND_PAPERS,
                 TaskType.GENERATE_IDEAS,
                 TaskType.SUGGEST_EXPERIMENTS,
                 TaskType.MAP_RESEARCH_OPPORTUNITIES,

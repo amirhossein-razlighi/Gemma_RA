@@ -59,10 +59,22 @@ class PaperAnalysis(BaseModel):
     limitations: list[str]
 
 
+class ReviewPaperSummary(BaseModel):
+    paper: PaperMetadata
+    problem: str
+    method: str
+    contributions: list[str]
+    limitations: list[str]
+
+
 class LiteratureReview(BaseModel):
     topic: str
     papers: list[PaperMetadata]
+    paper_summaries: list[ReviewPaperSummary]
+    field_overview: str
+    key_problems: list[str]
     themes: list[str]
+    methodological_trends: list[str]
     gaps: list[str]
     disagreements: list[str]
     synthesis: str
@@ -70,8 +82,11 @@ class LiteratureReview(BaseModel):
 
 class ResearchIdea(BaseModel):
     title: str
+    problem_targeted: str
     motivation: str
     novelty_rationale: str
+    grounding: str
+    expected_contribution: str
     related_papers: list[str]
     proposed_method: str
     risks: list[str]
@@ -79,10 +94,13 @@ class ResearchIdea(BaseModel):
 
 class ExperimentSuggestion(BaseModel):
     title: str
+    related_papers: list[str]
+    baseline: str
     hypothesis: str
     setup: str
     metrics: list[str]
     expected_signal: str
+    why_this_matters: str
     failure_conditions: list[str]
 
 

@@ -64,6 +64,36 @@ def test_search_with_fallbacks_uses_broader_queries_when_needed() -> None:
     ]
 
 
+def test_search_with_fallbacks_splits_camelcase_professor_names() -> None:
+    source = ArxivPaperSource(ArxivConfig())
+    calls: list[str] = []
+
+    def fake_search_query(query: str):
+        calls.append(query)
+        if query == 'au:"Daniel Cohen Or"':
+            return source._parse_feed(
+                """
+                <feed xmlns="http://www.w3.org/2005/Atom">
+                  <entry>
+                    <id>http://arxiv.org/abs/9999.0002v1</id>
+                    <title>Recovered Graphics Paper</title>
+                    <summary>Abstract.</summary>
+                    <author><name>Daniel Cohen-Or</name></author>
+                  </entry>
+                </feed>
+                """
+            )
+        return []
+
+    source.search_query = fake_search_query  # type: ignore[method-assign]
+
+    docs, notes = source.search_with_fallbacks("Daniel CohenOr", "computer vision")
+
+    assert docs[0].metadata.title == "Recovered Graphics Paper"
+    assert any('author-only (Daniel Cohen Or)' in note for note in notes)
+    assert 'au:"Daniel Cohen Or"' in calls
+
+
 def test_fetch_pdf_document_downloads_and_reads_full_text(tmp_path: Path) -> None:
     source = ArxivPaperSource(ArxivConfig())
     metadata = PaperMetadata(

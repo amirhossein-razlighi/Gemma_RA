@@ -18,7 +18,18 @@ def render_analysis_result(result: TaskResult) -> str:
         lines.extend(_section("Contributions", _render_list(content["contributions"])))
         lines.extend(_section("Limitations", _render_list(content["limitations"])))
     elif result.task == TaskType.REVIEW_TOPIC:
+        lines.extend(_section("Field Overview", content["field_overview"]))
+        lines.extend(_section("Key Problems", _render_list(content["key_problems"])))
+        for item in content["paper_summaries"]:
+            body = (
+                f"Problem: {item['problem']}\n\n"
+                f"Method: {item['method']}\n\n"
+                f"Contributions: {', '.join(item['contributions'])}\n\n"
+                f"Limitations: {', '.join(item['limitations'])}"
+            )
+            lines.extend(_section(f"Paper: {item['paper']['title']}", body))
         lines.extend(_section("Themes", _render_list(content["themes"])))
+        lines.extend(_section("Methodological Trends", _render_list(content["methodological_trends"])))
         lines.extend(_section("Research Gaps", _render_list(content["gaps"])))
         lines.extend(_section("Disagreements", _render_list(content["disagreements"])))
         lines.extend(_section("Synthesis", content["synthesis"]))
@@ -29,13 +40,23 @@ def render_analysis_result(result: TaskResult) -> str:
         if content.get("discovery_notes"):
             lines.extend(_section("Search Trace", _render_list(content["discovery_notes"])))
         for item in content["results"]:
-            lines.extend(_section(item["title"], f"Authors: {', '.join(item['authors'])}\n\n{item['why_relevant']}"))
+            body = (
+                f"Authors: {', '.join(item['authors'])}\n\n"
+                f"Problem: {item['problem']}\n\n"
+                f"Method: {item['method']}\n\n"
+                f"Contributions: {', '.join(item['contributions'])}\n\n"
+                f"Why relevant: {item['why_relevant']}"
+            )
+            lines.extend(_section(item["title"], body))
     elif result.task == TaskType.GENERATE_IDEAS:
         lines.extend(_section("Topic", content["topic"]))
         for idea in content["ideas"]:
             body = (
+                f"Problem targeted: {idea['problem_targeted']}\n\n"
                 f"Motivation: {idea['motivation']}\n\n"
                 f"Novelty: {idea['novelty_rationale']}\n\n"
+                f"Grounding: {idea['grounding']}\n\n"
+                f"Expected contribution: {idea['expected_contribution']}\n\n"
                 f"Method: {idea['proposed_method']}\n\n"
                 f"Related papers: {', '.join(idea['related_papers'])}\n\n"
                 f"Risks: {', '.join(idea['risks'])}"
@@ -45,10 +66,13 @@ def render_analysis_result(result: TaskResult) -> str:
         lines.extend(_section("Topic", content["topic"]))
         for experiment in content["experiments"]:
             body = (
+                f"Related papers: {', '.join(experiment['related_papers'])}\n\n"
+                f"Baseline: {experiment['baseline']}\n\n"
                 f"Hypothesis: {experiment['hypothesis']}\n\n"
                 f"Setup: {experiment['setup']}\n\n"
                 f"Metrics: {', '.join(experiment['metrics'])}\n\n"
                 f"Expected signal: {experiment['expected_signal']}\n\n"
+                f"Why this matters: {experiment['why_this_matters']}\n\n"
                 f"Failure conditions: {', '.join(experiment['failure_conditions'])}"
             )
             lines.extend(_section(experiment["title"], body))
@@ -61,8 +85,11 @@ def render_analysis_result(result: TaskResult) -> str:
         lines.extend(_section("Open Problems", _render_list(content["open_problems"])))
         for idea in content["opportunities"]:
             body = (
+                f"Problem targeted: {idea['problem_targeted']}\n\n"
                 f"Motivation: {idea['motivation']}\n\n"
                 f"Novelty: {idea['novelty_rationale']}\n\n"
+                f"Grounding: {idea['grounding']}\n\n"
+                f"Expected contribution: {idea['expected_contribution']}\n\n"
                 f"Method: {idea['proposed_method']}\n\n"
                 f"Related papers: {', '.join(idea['related_papers'])}\n\n"
                 f"Risks: {', '.join(idea['risks'])}"
@@ -70,10 +97,13 @@ def render_analysis_result(result: TaskResult) -> str:
             lines.extend(_section(f"Opportunity: {idea['title']}", body))
         for experiment in content["experiments"]:
             body = (
+                f"Related papers: {', '.join(experiment['related_papers'])}\n\n"
+                f"Baseline: {experiment['baseline']}\n\n"
                 f"Hypothesis: {experiment['hypothesis']}\n\n"
                 f"Setup: {experiment['setup']}\n\n"
                 f"Metrics: {', '.join(experiment['metrics'])}\n\n"
                 f"Expected signal: {experiment['expected_signal']}\n\n"
+                f"Why this matters: {experiment['why_this_matters']}\n\n"
                 f"Failure conditions: {', '.join(experiment['failure_conditions'])}"
             )
             lines.extend(_section(f"Experiment: {experiment['title']}", body))
@@ -86,8 +116,11 @@ def render_analysis_result(result: TaskResult) -> str:
         lines.extend(_section("Hot Topics", _render_list(content["hot_topics"])))
         for idea in content["research_opportunities"]:
             body = (
+                f"Problem targeted: {idea['problem_targeted']}\n\n"
                 f"Motivation: {idea['motivation']}\n\n"
                 f"Novelty: {idea['novelty_rationale']}\n\n"
+                f"Grounding: {idea['grounding']}\n\n"
+                f"Expected contribution: {idea['expected_contribution']}\n\n"
                 f"Method: {idea['proposed_method']}\n\n"
                 f"Related papers: {', '.join(idea['related_papers'])}\n\n"
                 f"Risks: {', '.join(idea['risks'])}"
@@ -95,10 +128,13 @@ def render_analysis_result(result: TaskResult) -> str:
             lines.extend(_section(f"Opportunity: {idea['title']}", body))
         for experiment in content["experiment_suggestions"]:
             body = (
+                f"Related papers: {', '.join(experiment['related_papers'])}\n\n"
+                f"Baseline: {experiment['baseline']}\n\n"
                 f"Hypothesis: {experiment['hypothesis']}\n\n"
                 f"Setup: {experiment['setup']}\n\n"
                 f"Metrics: {', '.join(experiment['metrics'])}\n\n"
                 f"Expected signal: {experiment['expected_signal']}\n\n"
+                f"Why this matters: {experiment['why_this_matters']}\n\n"
                 f"Failure conditions: {', '.join(experiment['failure_conditions'])}"
             )
             lines.extend(_section(f"Experiment: {experiment['title']}", body))

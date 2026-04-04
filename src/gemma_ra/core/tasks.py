@@ -45,10 +45,21 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
         task_type=TaskType.REVIEW_TOPIC,
         purpose="Synthesize themes and research gaps across multiple papers.",
         allowed_tools=["local_pdf_reader", "arxiv_search", "analysis_engine"],
-        output_sections=["Themes", "Research Gaps", "Disagreements", "Synthesis"],
+        output_sections=[
+            "Field Overview",
+            "Per-Paper Summaries",
+            "Key Problems",
+            "Themes",
+            "Methodological Trends",
+            "Research Gaps",
+            "Disagreements",
+            "Synthesis",
+        ],
         constraints=[
             "Highlight concrete disagreements or tension between papers when present.",
-            "Focus on research-relevant synthesis rather than broad survey prose.",
+            "Write like a compact research survey, not a shallow bullet list.",
+            "Explain what each paper is trying to solve, how it approaches the problem, and what its main contributions are.",
+            "Ground cross-paper claims in the supplied papers rather than generic graph-learning commentary.",
         ],
         prompt_template=(
             "You are writing a structured literature review.\n"
@@ -57,6 +68,8 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
             "Professors: {professors}\n"
             "Output sections: {output_sections}\n"
             "Constraints:\n{constraints}\n\n"
+            "For each paper, identify the problem, core method, main contributions, and limitations.\n"
+            "Then synthesize the field-level patterns, important open problems, and methodological trends.\n\n"
             "Papers:\n{papers}\n"
         ),
     ),
@@ -64,10 +77,11 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
         task_type=TaskType.FIND_PAPERS,
         purpose="Rank and explain recent relevant papers from arXiv search results.",
         allowed_tools=["arxiv_search", "analysis_engine"],
-        output_sections=["Topic", "Results"],
+        output_sections=["Topic", "Results", "Per-Paper Triage"],
         constraints=[
             "Use only the supplied paper metadata and abstracts.",
             "Prefer recency and relevance to the stated topic.",
+            "For each paper, explain the problem it tackles, the main method, and why it matters for the topic.",
         ],
         prompt_template=(
             "You are triaging arXiv search results for a research assistant workflow.\n"
@@ -76,6 +90,7 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
             "Professors: {professors}\n"
             "Output sections: {output_sections}\n"
             "Constraints:\n{constraints}\n\n"
+            "For each paper, identify the target problem, the core technical idea, and the main contributions.\n\n"
             "Search results:\n{papers}\n"
         ),
     ),
@@ -87,6 +102,7 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
         constraints=[
             "Every idea should connect to at least one supplied paper.",
             "Explain why each idea may be novel or underexplored.",
+            "State clearly what problem each idea targets, how it is grounded in the papers, and what contribution it could make.",
         ],
         prompt_template=(
             "You are proposing grounded research directions based on a set of papers.\n"
@@ -94,6 +110,7 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
             "Topic: {topic}\n"
             "Professors: {professors}\n"
             "Constraints:\n{constraints}\n\n"
+            "For each idea, explain the concrete problem, the grounding in prior work, the expected contribution, and the proposed method.\n\n"
             "Source papers:\n{papers}\n"
         ),
     ),
@@ -105,6 +122,7 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
         constraints=[
             "Keep experiments lightweight and fast to evaluate.",
             "Prefer experiments that test feasibility before scaling.",
+            "Each experiment should name a baseline and explain why the experiment would be informative.",
         ],
         prompt_template=(
             "You are designing small validation experiments for a research idea exploration workflow.\n"
@@ -112,6 +130,7 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
             "Topic: {topic}\n"
             "Professors: {professors}\n"
             "Constraints:\n{constraints}\n\n"
+            "For each experiment, connect it to related papers, specify a baseline, and explain why the result would matter.\n\n"
             "Source papers:\n{papers}\n"
         ),
     ),
@@ -134,6 +153,7 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
             "Use co-authors only when they appear repeatedly or seem central to the topic.",
             "Ground every opportunity in the supplied papers and discovered research threads.",
             "Prefer concrete, testable, near-term research directions over vague moonshots.",
+            "For each opportunity and experiment, explain the target problem, grounding in prior work, and expected contribution or signal.",
         ],
         prompt_template=(
             "You are mapping a research field for a scientist looking for the next novel project.\n"

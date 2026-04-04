@@ -75,8 +75,11 @@ def test_map_research_opportunities_validates_composite_output() -> None:
                 "opportunities": [
                     {
                         "title": "Adaptive retrieval budgets",
+                        "problem_targeted": "Retriever-agent systems waste calls by using fixed retrieval depth even when evidence is already sufficient.",
                         "motivation": "Current systems over-retrieve.",
                         "novelty_rationale": "Budget control is underexplored for small agents.",
+                        "grounding": "Prior retrieval-agent pipelines focus on answer quality and tool use, but not adaptive stopping policies.",
+                        "expected_contribution": "A retrieval controller that reduces cost without sacrificing answer quality.",
                         "related_papers": ["Paper A"],
                         "proposed_method": "Learn a stopping policy for retrieval hops.",
                         "risks": ["May reduce recall"],
@@ -85,10 +88,13 @@ def test_map_research_opportunities_validates_composite_output() -> None:
                 "experiments": [
                     {
                         "title": "Budget ablation",
+                        "related_papers": ["Paper A"],
+                        "baseline": "A fixed-budget retrieval agent with the same backbone model.",
                         "hypothesis": "Adaptive retrieval can match quality with fewer calls.",
                         "setup": "Compare fixed and adaptive budgets on QA tasks.",
                         "metrics": ["accuracy", "tool calls"],
                         "expected_signal": "Same accuracy with fewer retrieval steps.",
+                        "why_this_matters": "It tests whether adaptive control improves efficiency without hurting usefulness.",
                         "failure_conditions": ["Accuracy drops sharply"],
                     }
                 ],
@@ -123,6 +129,56 @@ def test_map_research_opportunities_validates_composite_output() -> None:
     assert "Searched seed professor list." in result.content["search_strategy"]
 
 
+def test_review_topic_validates_richer_survey_output() -> None:
+    class ReviewClient:
+        def chat(self, messages, tools=None) -> dict:
+            return {"message": {"role": "assistant", "content": "READY", "tool_calls": []}}
+
+        def generate_structured(self, prompt: str, schema: dict) -> dict:
+            assert "For each paper, identify the problem" in prompt
+            return {
+                "topic": "graph representation learning",
+                "field_overview": "The field studies how to encode graph structure, features, and relational context into useful learned representations.",
+                "key_problems": [
+                    "capturing graph structure beyond shallow neighborhood aggregation",
+                    "scaling expressive models to large graphs",
+                ],
+                "paper_summaries": [
+                    {
+                        "paper_title": "Graph neural nets",
+                        "problem": "How to learn expressive graph representations for downstream prediction tasks.",
+                        "method": "Use message passing over graph neighborhoods with learned transformations.",
+                        "contributions": ["Strong empirical results", "A flexible message-passing framework"],
+                        "limitations": ["Can oversmooth on deep stacks"],
+                    }
+                ],
+                "themes": ["expressivity", "scalability"],
+                "methodological_trends": ["message passing", "structural encoding"],
+                "gaps": ["weak treatment of long-range dependencies"],
+                "disagreements": ["whether local aggregation is sufficient for graph structure"],
+                "synthesis": "Recent work pushes toward more expressive and scalable encoders while still struggling with long-range structure.",
+            }
+
+    engine = AnalysisEngine(ReviewClient())
+    paper = PaperDocument(
+        metadata=PaperMetadata(
+            paper_id="paper-1",
+            title="Graph neural nets",
+            authors=["Jane Doe"],
+            source="local",
+        ),
+        content="Graph neural nets for molecules.",
+        sections=[],
+    )
+    context = ResearchContext(task=TaskType.REVIEW_TOPIC, topic="graph representation learning", papers=[paper])
+
+    result = engine.run(TaskType.REVIEW_TOPIC, get_task_spec(TaskType.REVIEW_TOPIC), context)
+
+    assert result.content["paper_summaries"][0]["paper"]["title"] == "Graph neural nets"
+    assert result.content["paper_summaries"][0]["problem"].startswith("How to learn expressive")
+    assert result.content["methodological_trends"] == ["message passing", "structural encoding"]
+
+
 def test_run_instructions_validates_instruction_output() -> None:
     class InstructionClient:
         def chat(self, messages, tools=None) -> dict:
@@ -139,8 +195,11 @@ def test_run_instructions_validates_instruction_output() -> None:
                 "research_opportunities": [
                     {
                         "title": "Adaptive splat pruning",
+                        "problem_targeted": "Dense Gaussian splat scenes remain expensive to render interactively.",
                         "motivation": "Rendering cost remains high in dense scenes.",
                         "novelty_rationale": "Dynamic pruning policies appear underexplored.",
+                        "grounding": "Recent Gaussian splatting papers optimize quality-speed tradeoffs but typically use static pruning or compression policies.",
+                        "expected_contribution": "A scene-aware pruning strategy that preserves quality while reducing render cost.",
                         "related_papers": ["Paper A"],
                         "proposed_method": "Learn scene-aware pruning during rendering.",
                         "risks": ["Visual artifacts"],
@@ -149,10 +208,13 @@ def test_run_instructions_validates_instruction_output() -> None:
                 "experiment_suggestions": [
                     {
                         "title": "Pruning pilot",
+                        "related_papers": ["Paper A"],
+                        "baseline": "A static Gaussian pruning heuristic used in current rendering pipelines.",
                         "hypothesis": "Adaptive pruning reduces render cost with limited quality loss.",
                         "setup": "Compare static and adaptive pruning on benchmark scenes.",
                         "metrics": ["FPS", "PSNR"],
                         "expected_signal": "Higher FPS with similar PSNR.",
+                        "why_this_matters": "It shows whether adaptive control adds practical value over existing heuristics.",
                         "failure_conditions": ["Sharp PSNR drop"],
                     }
                 ],
@@ -429,6 +491,9 @@ def test_non_instruction_tasks_report_internal_tool_loop_completion() -> None:
                     {
                         "title": "Sample Paper",
                         "authors": ["Jane Doe"],
+                        "problem": "How to improve geometric reasoning in graphics pipelines.",
+                        "method": "A compact graph-based representation for local geometry interactions.",
+                        "contributions": ["A new representation", "A faster training recipe"],
                         "why_relevant": "Matches the topic.",
                     }
                 ],

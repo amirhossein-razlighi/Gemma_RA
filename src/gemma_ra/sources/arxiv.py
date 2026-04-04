@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 from xml.etree import ElementTree
@@ -43,26 +44,35 @@ class ArxivPaperSource:
         professor: str,
         topic: str | None,
     ) -> tuple[list[PaperDocument], list[str]]:
-        surname = professor.split()[-1] if professor.split() else professor
         queries: list[tuple[str, str]] = []
-        if topic:
-            queries.append(("author+topic", f'au:"{professor}" AND all:"{topic}"'))
-        queries.append(("author-only", f'au:"{professor}"'))
-        if topic and surname and surname.lower() != professor.lower():
-            queries.append(("surname+topic", f'au:"{surname}" AND all:"{topic}"'))
-        if surname and surname.lower() != professor.lower():
-            queries.append(("surname-only", f'au:"{surname}"'))
-        if topic:
-            queries.append(("fulltext-name+topic", f'all:"{professor}" AND all:"{topic}"'))
-        queries.append(("fulltext-name", f'all:"{professor}"'))
+        for name_variant in self._name_variants(professor):
+            surname = name_variant.split()[-1] if name_variant.split() else name_variant
+            if topic:
+                queries.append((f'author+topic ({name_variant})', f'au:"{name_variant}" AND all:"{topic}"'))
+            queries.append((f'author-only ({name_variant})', f'au:"{name_variant}"'))
+            if topic and surname and surname.lower() != name_variant.lower():
+                queries.append((f'surname+topic ({surname})', f'au:"{surname}" AND all:"{topic}"'))
+            if surname and surname.lower() != name_variant.lower():
+                queries.append((f'surname-only ({surname})', f'au:"{surname}"'))
+            if topic:
+                queries.append((f'fulltext-name+topic ({name_variant})', f'all:"{name_variant}" AND all:"{topic}"'))
+            queries.append((f'fulltext-name ({name_variant})', f'all:"{name_variant}"'))
+
+        deduped_queries: list[tuple[str, str]] = []
+        seen_queries: set[str] = set()
+        for label, query in queries:
+            if query in seen_queries:
+                continue
+            seen_queries.add(query)
+            deduped_queries.append((label, query))
 
         combined: list[PaperDocument] = []
         notes: list[str] = []
-        for label, query in queries:
+        for label, query in deduped_queries:
             docs = self.search_query(query)
             notes.append(f'arXiv search "{label}" for "{professor}" returned {len(docs)} result(s).')
             combined.extend(docs)
-            if docs and label in {"author+topic", "author-only"}:
+            if docs and (label.startswith("author+topic") or label.startswith("author-only")):
                 break
 
         deduped = self._dedupe(combined)
@@ -72,6 +82,26 @@ class ArxivPaperSource:
                 + (f' with topic "{topic}".' if topic else ".")
             )
         return deduped, notes
+
+    @staticmethod
+    def _name_variants(professor: str) -> list[str]:
+        cleaned = " ".join(professor.strip().split())
+        variants: list[str] = []
+        if cleaned:
+            variants.append(cleaned)
+            split_camel = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", cleaned)
+            split_camel = " ".join(split_camel.split())
+            if split_camel and split_camel not in variants:
+                variants.append(split_camel)
+            dehyphenated = cleaned.replace("-", " ")
+            dehyphenated = " ".join(dehyphenated.split())
+            if dehyphenated and dehyphenated not in variants:
+                variants.append(dehyphenated)
+            normalized = re.sub(r"[^A-Za-z0-9]+", " ", split_camel)
+            normalized = " ".join(normalized.split())
+            if normalized and normalized not in variants:
+                variants.append(normalized)
+        return variants
 
     def search_query(self, search_query: str) -> list[PaperDocument]:
         params = {

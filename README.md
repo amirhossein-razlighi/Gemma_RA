@@ -1,90 +1,196 @@
 # Gemma_RA
 
-Open-source research assistant and experiment loop for Gemma4 on Ollama.
+Personal research assistant for Gemma 4 on Ollama.
 
-Gemma_RA can read papers, search arXiv, synthesize literature, propose research directions, and execute constrained workspace experiments from a free-form `INSTRUCTIONS.md`.
+Gemma_RA can:
+- read local PDFs
+- search arXiv by professor name
+- write paper summaries and mini-surveys
+- generate grounded research ideas and experiments
+- run constrained code-and-log loops from a free-form `INSTRUCTIONS.md`
 
-## TL;DR
+## 🚀 TL;DR
 
-- Local-first research assistant powered by Gemma4 via Ollama
-- Reads local PDFs and searches arXiv by professor name
-- Produces structured outputs for summaries, reviews, ideas, and experiment plans
-- Can run code, inspect logs, edit files, and iterate inside a constrained workspace
-- Look at the demo where the agent tunes a regression task until it succeeds!
+If you want your own local research assistant with Gemma:
 
-## Why This Is Fun
+```bash
+ollama pull gemma4
+uv sync --extra dev
+uv run gemma-ra run-instructions --instructions-file ./INSTRUCTIONS.md
+```
 
-- `INSTRUCTIONS.md` as the interface: write what you want, let the agent choose tools
-- Same runtime can do paper work and code work
-- Tool use is constrained to a configured workspace root
-- Outputs are both human-readable Markdown and machine-readable JSON
-- Verbose mode lets you watch the loop think, call tools, run code, and react to logs
+Or if you want to see it work immediately:
 
-## First version Highlights
+```bash
+uv run gemma-ra run-instructions \
+  --instructions-file examples/regression_task/INSTRUCTIONS.md \
+  --config examples/regression_task/gemma_ra.example.yaml
+```
 
-The bundled regression demo starts from a failing setup and lets the agent iterate until success:
+## Why This Repo Is Useful
 
-- initial loss: `16.7727`
-- final loss: `0.0000803726`
-- final config: `learning_rate=0.005`, `epochs=500`
-- success criterion: `final_loss <= 0.005`
-- unique model-driven config attempts: `4`
+- Local-first: Gemma runs through Ollama on your machine
+- Paper-first: works with PDFs, arXiv, and professor-name discovery
+- Agentic when needed: can inspect files, run code, read logs, edit configs, and iterate
+- Constrained by design: tool use stays inside a configured workspace
+- Structured outputs: each run writes both Markdown and JSON
 
-That result came from the agent reading the code, running training, reading logs, changing hyperparameters, and rerunning until the target was met.
+## What You Can Do
 
-![Regression tuning history](static/regression_tuning_history.png)
+### Paper workflows
 
-The chart above is generated from [examples/regression_task/logs/history.jsonl](examples/regression_task/logs/history.jsonl) after deduplicating repeated runs. It shows the agent trying:
+- `analyze-paper`: break one paper into problem, method, contributions, and limitations
+- `review-topic`: produce a compact survey across papers
+- `find-papers`: search and triage relevant papers
+- `generate-ideas`: propose research directions grounded in papers
+- `suggest-experiments`: propose lightweight validation experiments
+- `map-research-opportunities`: go from seed professors to field summary, open problems, ideas, and experiments
 
-- `lr=0.001, epochs=20`
-- `lr=0.0001, epochs=100`
-- `lr=0.005, epochs=100`
-- `lr=0.005, epochs=500`
+### Instruction workflow
 
-See the final run artifact in [examples/regression_task/logs/latest.json](examples/regression_task/logs/latest.json).
+`run-instructions` reads a free-form `INSTRUCTIONS.md` and lets the model decide which tools to call.
 
-## What It Can Do
+That means you can write things like:
 
-- Analyze a paper into problem, inputs, method, outputs, ideas, contributions, and limitations
-- Review a topic from local papers or professor-based arXiv discovery
-- Find recent papers from arXiv and explain why they matter
-- Generate grounded research ideas from papers
-- Suggest lightweight experiments to test those ideas
-- Map a field end-to-end from seed professors and papers to novel opportunities
-- Read `INSTRUCTIONS.md`, choose tools, run experiments, inspect logs, and keep iterating
+- “Read papers from Andreas Tagliasacchi related to Gaussian Splatting and summarize the field.”
+- “Tune this training script until validation accuracy reaches 0.88.”
+- “Stop changing hyperparameters and edit `train.py` instead.”
 
-## Project Layout
+## 🔧 Quick Start
 
-- `src/gemma_ra/cli.py`: CLI entrypoints
-- `src/gemma_ra/agent`: orchestration and tool registry
-- `src/gemma_ra/sources`: local PDF ingestion and arXiv search
-- `src/gemma_ra/analysis`: tool loop, prompting, structured outputs, rendering
-- `src/gemma_ra/core`: config, schemas, artifacts, model client, workspace executor, task specs
-- `examples/regression_task`: runnable demo for autonomous hyperparameter tuning
-- `examples/mnist_mlp_task`: harder torch MLP demo on synthetic MNIST-style digits
-- `tests`: unit and integration-style tests
-
-## Requirements
+### 1. Requirements
 
 - Python 3.11+
 - [uv](https://github.com/astral-sh/uv)
 - [Ollama](https://ollama.com/)
-- A local Gemma4 model available in Ollama
-
-Example:
+- a local Gemma 4 model
 
 ```bash
 ollama pull gemma4
 ```
 
-## Setup
+### 2. Install
 
 ```bash
 uv venv
 uv sync --extra dev
 ```
 
-Default config in `gemma_ra.yaml`:
+### 3. Check the CLI
+
+```bash
+uv run gemma-ra --help
+```
+
+## ⚡ Fastest Ways To Try It
+
+### A. Analyze a paper
+
+```bash
+uv run gemma-ra analyze-paper --paper ./papers/example.pdf
+```
+
+### B. Run the autonomous demo
+
+```bash
+uv run gemma-ra run-instructions \
+  --instructions-file examples/regression_task/INSTRUCTIONS.md \
+  --config examples/regression_task/gemma_ra.example.yaml
+```
+
+This demo starts from a failing setup and lets the agent:
+- inspect the workspace
+- run training
+- read logs
+- edit config/code
+- rerun until the target is met
+
+📊 The bundled regression demo reached:
+- initial loss: `16.7727`
+- final loss: `0.0000803726`
+- success target: `final_loss <= 0.005`
+
+![Regression tuning history](static/regression_tuning_history.png)
+
+There is also a harder `torch` example in [examples/mnist_mlp_task/README.md](examples/mnist_mlp_task/README.md).
+
+## 🧭 Common Commands
+
+Analyze a local paper:
+
+```bash
+uv run gemma-ra analyze-paper --paper ./papers/example.pdf
+```
+
+Review a topic from local papers:
+
+```bash
+uv run gemma-ra review-topic --topic "graph representation learning" --papers-dir ./papers
+```
+
+Search papers by professor name:
+
+```bash
+uv run gemma-ra find-papers --topic "computer vision" --professor "Ali Mahdavi Amiri"
+```
+
+Use multiple professors:
+
+```bash
+uv run gemma-ra generate-ideas \
+  --topic "computer vision" \
+  --professor "Daniel CohenOr, Jitendra Malik"
+```
+
+Map a field end-to-end:
+
+```bash
+uv run gemma-ra map-research-opportunities \
+  --topic "graph representation learning" \
+  --professor "Jure Leskovec"
+```
+
+Run your own instruction file:
+
+```bash
+uv run gemma-ra run-instructions --instructions-file ./INSTRUCTIONS.md
+```
+
+## ⚙ How `run-instructions` Works
+
+1. You write a goal in `INSTRUCTIONS.md`
+2. The agent reads the workspace and available papers
+3. It chooses tools, runs code if needed, and reads logs/results
+4. It keeps iterating until success criteria are met or the iteration budget is exhausted
+
+While it runs, you can type guidance directly in the terminal to steer it.
+
+Examples:
+
+- `stop hyperparameter tuning and modify train.py`
+- `focus on papers from 2024 and later`
+- `fetch full text before summarizing`
+
+## Workspace Tools
+
+Inside `run-instructions`, the agent can use constrained tools to:
+
+- list files
+- read text files and logs
+- write or append files
+- replace snippets in files
+- update JSON config fields
+- edit Python functions
+- syntax-check Python
+- run Python via `uv run python`
+
+All of this is restricted to the configured workspace root.
+
+## ⚙ Configuration
+
+Default config lives in [gemma_ra.yaml](./gemma_ra.yaml).
+
+Important fields:
 
 ```yaml
 ollama:
@@ -98,107 +204,30 @@ papers_dir: "./papers"
 output_dir: "./outputs"
 ```
 
-## Fastest Demo
-
-Watch the agent tune a toy regression project until it succeeds:
-
-```bash
-uv run gemma-ra run-instructions \
-  --instructions-file examples/regression_task/INSTRUCTIONS.md \
-  --config examples/regression_task/gemma_ra.example.yaml \
-  --verbose
-```
-
-What happens:
-
-1. The agent reads [examples/regression_task/INSTRUCTIONS.md](examples/regression_task/INSTRUCTIONS.md)
-2. It inspects the workspace files
-3. It runs [examples/regression_task/train.py](examples/regression_task/train.py) with `uv run python`
-4. It reads [examples/regression_task/logs/latest.json](examples/regression_task/logs/latest.json)
-5. It edits [examples/regression_task/config.json](examples/regression_task/config.json)
-6. It reruns until the target loss is achieved
-
-Want a harder example with `torch` and a real neural network training loop?
-
-```bash
-uv pip install torch
-uv run gemma-ra run-instructions \
-  --instructions-file examples/mnist_mlp_task/INSTRUCTIONS.md \
-  --config examples/mnist_mlp_task/gemma_ra.example.yaml
-```
-
-## CLI Examples
-
-Analyze a local paper:
-
-```bash
-uv run gemma-ra analyze-paper --paper ./papers/example.pdf
-```
-
-Review a topic from local PDFs:
-
-```bash
-uv run gemma-ra review-topic --topic "graph representation learning" --papers-dir ./papers --verbose
-```
-
-Find papers by professor name on arXiv:
-
-```bash
-uv run gemma-ra find-papers --topic "computer graphics" --professor "Ali Mahdavi Amiri" --verbose
-```
-
-Generate research ideas, based on recent papers of a professor:
-
-```bash
-uv run gemma-ra generate-ideas --topic "small-model agents" --professor "Yejin Choi" --verbose
-```
-
-Suggest lightweight experiments:
-
-```bash
-uv run gemma-ra suggest-experiments --topic "retrieval-free literature agents" --papers-dir ./papers --verbose
-```
-
-Map a field in one run:
-
-```bash
-uv run gemma-ra map-research-opportunities --topic "computer vision" --professor "Daniel CohenOr" --papers-dir ./papers --verbose
-```
-
-Run a free-form instruction file:
-
-```bash
-uv run gemma-ra run-instructions --instructions-file ./INSTRUCTIONS.md --verbose
-```
-
-## Constrained Tooling
-
-`run-instructions` can use constrained workspace tools to:
-
-- list files under a configured workspace root
-- read workspace files and logs
-- write workspace files
-- update JSON fields like hyperparameters
-- run Python scripts through `uv run python`
-
-These tools are intentionally limited to the configured workspace root, and the loop is capped by `executor.max_iterations`.
-
 ## Outputs
 
 Each run writes:
 
 - a Markdown artifact for humans
-- a JSON artifact for downstream tooling
+- a JSON artifact for tooling
 
-By default artifacts are stored under `./outputs`.
+By default they are saved in `./outputs`.
 
-## Notes
+## Repo Layout
 
-- Ollama is the only model backend in v0.1.0
-- Online paper discovery is arXiv-only for now
-- Local PDF ingestion assumes text-extractable PDFs, not OCR
-- arXiv API requests use `https://export.arxiv.org/api/query`
-- The agent can execute iterative experiment loops, but only inside the configured workspace root
+- [src/gemma_ra/cli.py](src/gemma_ra/cli.py): CLI entrypoints
+- [src/gemma_ra/agent](src/gemma_ra/agent): orchestration
+- [src/gemma_ra/sources](src/gemma_ra/sources): local PDFs and arXiv
+- [src/gemma_ra/analysis](src/gemma_ra/analysis): tool loop and structured outputs
+- [src/gemma_ra/core](src/gemma_ra/core): config, schemas, model client, workspace tools
+- [examples](examples): runnable demos
+
+## Limits In v0.1.0
+
+- Ollama is the only backend
+- arXiv is the only online paper source
+- local PDF ingestion assumes text-extractable PDFs
+- OCR and broad web indexing are out of scope for now
 
 ## Testing
 
